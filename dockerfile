@@ -17,8 +17,9 @@ WORKDIR /app
 COPY --from=build /app/publish .
 
 # Expose Render's expected port
-ENV ASPNETCORE_URLS=http://+:10000
-EXPOSE 10000
+ENV ASPNETCORE_URLS=http://+:${PORT}
+EXPOSE 5106
+
 
 # Run the app
-ENTRYPOINT ["dotnet", "SpotiLove.dll"]
+ENTRYPOINT ["dotnet", "JsonDemo.dll"]
