@@ -18,7 +18,7 @@ COPY --from=build /app/publish .
 
 # Expose Render's expected port
 ENV ASPNETCORE_URLS=http://+:${PORT}
-EXPOSE 5106
+EXPOSE 10000
 
 
 # Run the app

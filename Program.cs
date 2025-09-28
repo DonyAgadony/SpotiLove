@@ -57,7 +57,7 @@ if (app.Environment.IsDevelopment())
 }
 
 // ---- Server Configuration ----
-var port = Environment.GetEnvironmentVariable("PORT") ?? "5106";
+var port = Environment.GetEnvironmentVariable("PORT") ?? "10000";
 app.Urls.Add($"http://0.0.0.0:{port}");
 app.Urls.Add("http:// 192.168.25.86:5106");
 
