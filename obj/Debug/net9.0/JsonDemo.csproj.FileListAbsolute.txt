@@ -164,3 +164,4 @@ C:\Users\User\Desktop\DanielHamelech\SpotiLove\JsonDemo\bin\Debug\net9.0\Spotify
 C:\Users\User\Desktop\DanielHamelech\SpotiLove\JsonDemo\bin\Debug\net9.0\Swan.Lite.dll
 C:\Users\User\Desktop\DanielHamelech\SpotiLove\JsonDemo\bin\Debug\net9.0\DotNetEnv.dll
 C:\Users\User\Desktop\DanielHamelech\SpotiLove\JsonDemo\bin\Debug\net9.0\Sprache.dll
+C:\Users\User\Desktop\DanielHamelech\SpotiLove\JsonDemo\obj\Debug\net9.0\JsonDemo.sourcelink.json

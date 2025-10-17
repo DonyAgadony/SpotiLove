@@ -1,6 +1,8 @@
 using Microsoft.EntityFrameworkCore;
 using Spotilove;
 using DotNetEnv;
+using Microsoft.AspNetCore.Identity;
+using System.Text.Json.Serialization;
 
 DotNetEnv.Env.Load(); // load .env file
 
@@ -20,6 +22,8 @@ builder.Services.AddSwaggerGen();
 // ---- Services ----
 builder.Services.AddScoped<MatchService>();
 builder.Services.AddScoped<SwipeService>(); // Add SwipeService
+builder.Services.AddScoped<IPasswordHasher<User>, PasswordHasher<User>>();
+
 
 // SpotifyService setup (Singleton since it holds state)
 builder.Services.AddSingleton(provider => new SpotifyService(
@@ -62,7 +66,6 @@ app.Urls.Add($"http://0.0.0.0:{port}");
 app.Urls.Add("http:// 192.168.25.86:5106");
 
 // ================== API Endpoints ====================
-
 // ---- Health Check ----
 app.MapGet("/", () => Results.Ok(new
 {
@@ -88,13 +91,126 @@ app.MapGet("/", () => Results.Ok(new
         swagger = "/swagger"
     }
 }));
+app.MapGet("/users", async (AppDbContext db, HttpRequest request) =>
+{
+    if (!request.Query.ContainsKey("userId"))
+        return Results.BadRequest("Missing userId");
+
+    if (!int.TryParse(request.Query["userId"], out int currentUserId))
+        return Results.BadRequest("Invalid userId");
+
+    var currentUser = await db.Users
+        .Include(u => u.MusicProfile)
+        .Include(u => u.Images)
+        .FirstOrDefaultAsync(u => u.Id == currentUserId);
+
+    if (currentUser == null || currentUser.MusicProfile == null)
+        return Results.NotFound("User or music profile not found");
+
+    // Load queue items for this user
+    var queueItems = await db.UserSuggestionQueues
+        .Where(q => q.UserId == currentUserId)
+        .OrderBy(q => q.QueuePosition)
+        .ToListAsync();
+
+    var suggestions = new List<UserDto>();
+    int positionCounter = queueItems.Any() ? queueItems.Max(q => q.QueuePosition) + 1 : 0;
+
+    var otherUsers = await db.Users
+        .Include(u => u.MusicProfile)
+        .Include(u => u.Images)
+        .Where(u => u.Id != currentUserId && u.MusicProfile != null)
+        .ToListAsync();
+
+    foreach (var user in otherUsers)
+    {
+        // Skip if already in queue and score < 60%
+        var existingQueueItem = queueItems.FirstOrDefault(q => q.SuggestedUserId == user.Id);
+        double score;
+
+        if (existingQueueItem != null)
+        {
+            score = existingQueueItem.CompatibilityScore;
+        }
+        else
+        {
+            int? percentage = await GeminiService.CalculatePercentage(currentUser.MusicProfile, user.MusicProfile!);
+            score = percentage ?? 0;
+
+            // Add to queue with position
+            var queueItem = new UserSuggestionQueue
+            {
+                UserId = currentUserId,
+                SuggestedUserId = user.Id,
+                QueuePosition = positionCounter++,
+                CompatibilityScore = score,
+                CreatedAt = DateTime.UtcNow
+            };
+
+            db.UserSuggestionQueues.Add(queueItem);
+            await db.SaveChangesAsync();
+        }
+
+        if (score >= 60)
+        {
+            suggestions.Add(new UserDto
+            {
+                Id = user.Id,
+                Name = user.Name,
+                Email = user.Email,
+                Age = user.Age,
+                Location = user.Location,
+                Bio = user.Bio,
+                MusicProfile = new MusicProfileDto
+                {
+                    FavoriteGenres = user.MusicProfile!.FavoriteGenres,
+                    FavoriteArtists = user.MusicProfile.FavoriteArtists,
+                    FavoriteSongs = user.MusicProfile.FavoriteSongs
+                },
+                Images = user.Images.Select(i => i.ImageUrl ?? i.Url).ToList()
+            });
+        }
+    }
+
+    // Ensure at least 10 suggestions, fill with random remaining users if needed
+    if (suggestions.Count < 10)
+    {
+        var remaining = otherUsers
+            .Where(u => !suggestions.Any(s => s.Id == u.Id))
+            .OrderBy(_ => Guid.NewGuid())
+            .Take(10 - suggestions.Count)
+            .Select(u => new UserDto
+            {
+                Id = u.Id,
+                Name = u.Name,
+                Email = u.Email,
+                Age = u.Age,
+                Location = u.Location,
+                Bio = u.Bio,
+                MusicProfile = new MusicProfileDto
+                {
+                    FavoriteGenres = u.MusicProfile!.FavoriteGenres,
+                    FavoriteArtists = u.MusicProfile.FavoriteArtists,
+                    FavoriteSongs = u.MusicProfile.FavoriteSongs
+                },
+                Images = u.Images.Select(i => i.ImageUrl ?? i.Url).ToList()
+            });
+
+        suggestions.AddRange(remaining);
+    }
+
+    return Results.Ok(new TakeExUsersResponse
+    {
+        Success = true,
+        Count = suggestions.Count,
+        Users = suggestions
+    });
+});
 
 app.MapGet("/health", () => Results.Ok(new { ok = true, now = DateTime.UtcNow }));
 //Take 10 Example Users from DB
 // ---- NEW: Take 10 Example Users Endpoint ----
 // ---- NEW: Take Random Users & Compare Music Taste ----
-// ---- NEW: Take Random Users Endpoint ----
-// ---- NEW: Take Random Users Endpoint ----
 app.MapGet("/takeExUsers", async (AppDbContext db, int count) =>
 {
     try
@@ -243,7 +359,99 @@ app.MapPost("/test/add-users", async (AppDbContext db) =>
 .WithName("AddExampleUsers")
 .WithSummary("Add 100 example users to the database")
 .WithDescription("Clears existing data and adds 100 example users with random profiles for testing");
+app.MapPost("/auth/register", async (
+    RegisterRequest request,
+    AppDbContext db,
+    IPasswordHasher<User> hasher) =>
+{
+    // Check if email already exists
+    if (await db.Users.AnyAsync(u => u.Email == request.Email))
+    {
+        return Results.BadRequest(new { success = false, message = "Email already exists" });
+    }
 
+    // Hash password
+    var hashedPassword = hasher.HashPassword(null!, request.Password);
+
+    // Create user
+    var user = new User
+    {
+        Name = request.Name,
+        Email = request.Email,
+        PasswordHash = hashedPassword,
+        Age = request.Age,
+        Gender = request.Gender
+    };
+
+    db.Users.Add(user);
+    await db.SaveChangesAsync();
+
+    // You could generate a JWT token here if you want
+    var token = Guid.NewGuid().ToString(); // Placeholder
+
+    return Results.Ok(new
+    {
+        success = true,
+        message = "User registered successfully",
+        token,
+        user = new
+        {
+            user.Id,
+            user.Name,
+            user.Email,
+            user.Age,
+            user.Gender
+        }
+    });
+});
+app.MapPost("/auth/login", async (
+    LoginRequestFromApp request,
+    AppDbContext db,
+    IPasswordHasher<User> hasher) =>
+{
+    // Find user by email
+    var user = await db.Users.FirstOrDefaultAsync(u => u.Email == request.Email);
+    if (user == null)
+    {
+        return Results.BadRequest(new
+        {
+            success = false,
+            message = "Invalid email or password"
+        });
+    }
+
+    // Verify password
+    var result = hasher.VerifyHashedPassword(user, user.PasswordHash, request.Password);
+    if (result == PasswordVerificationResult.Failed)
+    {
+        return Results.BadRequest(new
+        {
+            success = false,
+            message = "Invalid email or password"
+        });
+    }
+
+    // Generate a fake token for now (replace with JWT later)
+    var token = Guid.NewGuid().ToString();
+
+    // Optional: handle "RememberMe" if you want longer token lifetime
+    // (right now, it’s just informational)
+
+    return Results.Ok(new
+    {
+        success = true,
+        message = "Login successful",
+        token,
+        user = new
+        {
+            user.Id,
+            user.Name,
+            user.Email,
+            user.Age,
+            user.Gender
+        }
+    });
+});
 // ---- NEW: Test From Database Endpoint ----
 app.MapGet("/test/database", async (AppDbContext db, SwipeService swipeService) =>
 {

@@ -1,3 +1,4 @@
+using System.Text;
 using Microsoft.EntityFrameworkCore;
 
 namespace Spotilove;
@@ -72,12 +73,54 @@ public class User
     public string Name { get; set; } = string.Empty;
     public int Age { get; set; }
     public string Gender { get; set; } = string.Empty;
+
+    // Authentication fields
+    public string? Email { get; set; }
+    public string? PasswordHash { get; set; } // Store hashed password
+    public DateTime? LastLoginAt { get; set; }
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+
+    // Profile fields
+    public string? Bio { get; set; }
+    public string? Location { get; set; }
+
+    // Navigation properties
     public MusicProfile? MusicProfile { get; set; }
     public List<UserImage> Images { get; set; } = new();
     public List<Like> Likes { get; set; } = new();
-    public string? Bio { get; set; }
-    public string? Location { get; set; }
-    public string? Email { get; set; }
+}
+
+// Add password hashing utility class
+public static class PasswordHasher
+{
+    // Simple hash for demo - use BCrypt or ASP.NET Identity in production
+    public static string HashPassword(string password)
+    {
+        using var sha256 = System.Security.Cryptography.SHA256.Create();
+        var bytes = Encoding.UTF8.GetBytes(password + "SpotiLove_Salt");
+        var hash = sha256.ComputeHash(bytes);
+        return Convert.ToBase64String(hash);
+    }
+
+    public static bool VerifyPassword(string password, string hash)
+    {
+        var newHash = HashPassword(password);
+        return newHash == hash;
+    }
+}
+public class RegisterRequest
+{
+    public string Name { get; set; } = string.Empty;
+    public string Email { get; set; } = string.Empty;
+    public string Password { get; set; } = string.Empty;
+    public int Age { get; set; }
+    public string Gender { get; set; } = string.Empty;
+}
+public class LoginRequestFromApp
+{
+    public string Email { get; set; } = string.Empty;
+    public string Password { get; set; } = string.Empty;
+    public bool RememberMe { get; set; }
 }
 
 public class UserImage
