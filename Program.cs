@@ -50,6 +50,13 @@ using (var scope = app.Services.CreateScope())
 {
     var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
     db.Database.Migrate();
+
+    // Auto-seed database if empty on startup
+    if (!await db.Users.AnyAsync())
+    {
+        Console.WriteLine("🌱 Database is empty. Auto-seeding with example users...");
+        await SeedDatabaseAsync(db);
+    }
 }
 
 // ---- Development Tools ----
@@ -62,7 +69,6 @@ if (app.Environment.IsDevelopment())
 // ---- Server Configuration ----
 var port = Environment.GetEnvironmentVariable("PORT") ?? "10000";
 app.Urls.Add($"http://0.0.0.0:{port}");
-app.Urls.Add("http:// 192.168.25.86:5106");
 
 // ================== API Endpoints ====================
 // ---- Health Check ----
@@ -78,7 +84,7 @@ app.MapGet("/", () => Results.Ok(new
         test_from_database = "/test/database",
         spotify_login = "/login",
         spotify_callback = "/callback",
-        users = "/users",
+        users = "/users?userId={id}",
         user_images = "/users/{id}/images",
         swipe_discover = "/swipe/discover/{userId}",
         swipe_action = "/swipe",
@@ -86,139 +92,216 @@ app.MapGet("/", () => Results.Ok(new
         swipe_pass = "/swipe/{fromUserId}/pass/{toUserId}",
         matches = "/matches/{userId}",
         swipe_stats = "/swipe/stats/{userId}",
-        likes = "/likes",
         swagger = "/swagger"
     }
 }));
-app.MapPost("/swipe", async (AppDbContext db, LikeDto dto) =>
-{
-    var service = new SwipeService(db);
-    var result = await service.SwipeAsync(dto.FromUserId, dto.ToUserId, dto.IsLike);
-    return Results.Ok(result);
-});
+
+// ---- MODIFIED: More robust /users endpoint with better error handling ----
 app.MapGet("/users", async (AppDbContext db, HttpRequest request) =>
 {
-    if (!request.Query.ContainsKey("userId"))
-        return Results.BadRequest("Missing userId");
-
-    if (!int.TryParse(request.Query["userId"], out int currentUserId))
-        return Results.BadRequest("Invalid userId");
-
-    var currentUser = await db.Users
-        .Include(u => u.MusicProfile)
-        .Include(u => u.Images)
-        .FirstOrDefaultAsync(u => u.Id == currentUserId);
-
-    if (currentUser == null || currentUser.MusicProfile == null)
-        return Results.NotFound("User or music profile not found");
-
-    // Get all users the current user already swiped on
-    var swipedUserIds = await db.Likes
-        .Where(l => l.FromUserId == currentUserId)
-        .Select(l => l.ToUserId)
-        .ToListAsync();
-
-    // Get users already in the suggestion queue
-    var queueItems = await db.UserSuggestionQueues
-        .Where(q => q.UserId == currentUserId)
-        .OrderBy(q => q.QueuePosition)
-        .ToListAsync();
-
-    var suggestions = new List<UserDto>();
-    int positionCounter = queueItems.Any() ? queueItems.Max(q => q.QueuePosition) + 1 : 0;
-
-    var otherUsers = await db.Users
-        .Include(u => u.MusicProfile)
-        .Include(u => u.Images)
-        .Where(u => u.Id != currentUserId && u.MusicProfile != null && !swipedUserIds.Contains(u.Id))
-        .ToListAsync();
-
-    foreach (var user in otherUsers)
+    try
     {
-        // Skip if already in queue
-        var existingQueueItem = queueItems.FirstOrDefault(q => q.SuggestedUserId == user.Id);
-        double score;
-
-        if (existingQueueItem != null)
+        // Check if userId parameter exists
+        if (!request.Query.ContainsKey("userId"))
         {
-            score = existingQueueItem.CompatibilityScore;
-        }
-        else
-        {
-            int? percentage = await GeminiService.CalculatePercentage(currentUser.MusicProfile, user.MusicProfile!);
-            score = percentage ?? 0;
-
-            // Add to queue with position
-            var queueItem = new UserSuggestionQueue
+            return Results.BadRequest(new TakeExUsersResponse
             {
-                UserId = currentUserId,
-                SuggestedUserId = user.Id,
-                QueuePosition = positionCounter++,
-                CompatibilityScore = score,
-                CreatedAt = DateTime.UtcNow
-            };
-
-            db.UserSuggestionQueues.Add(queueItem);
-            await db.SaveChangesAsync();
-        }
-
-        if (score >= 60)
-        {
-            suggestions.Add(new UserDto
-            {
-                Id = user.Id,
-                Name = user.Name,
-                Email = user.Email,
-                Age = user.Age,
-                Location = user.Location,
-                Bio = user.Bio,
-                MusicProfile = new MusicProfileDto
-                {
-                    FavoriteGenres = user.MusicProfile!.FavoriteGenres,
-                    FavoriteArtists = user.MusicProfile.FavoriteArtists,
-                    FavoriteSongs = user.MusicProfile.FavoriteSongs
-                },
-                Images = user.Images.Select(i => i.ImageUrl ?? i.Url).ToList()
+                Success = false,
+                Count = 0,
+                Users = new List<UserDto>()
             });
         }
-    }
 
-    // Ensure at least 10 suggestions
-    if (suggestions.Count < 10)
-    {
-        var remaining = otherUsers
-            .Where(u => !suggestions.Any(s => s.Id == u.Id))
-            .OrderBy(_ => Guid.NewGuid())
-            .Take(10 - suggestions.Count)
-            .Select(u => new UserDto
+        if (!int.TryParse(request.Query["userId"], out int currentUserId))
+        {
+            return Results.BadRequest(new TakeExUsersResponse
             {
-                Id = u.Id,
-                Name = u.Name,
-                Email = u.Email,
-                Age = u.Age,
-                Location = u.Location,
-                Bio = u.Bio,
-                MusicProfile = new MusicProfileDto
-                {
-                    FavoriteGenres = u.MusicProfile!.FavoriteGenres,
-                    FavoriteArtists = u.MusicProfile.FavoriteArtists,
-                    FavoriteSongs = u.MusicProfile.FavoriteSongs
-                },
-                Images = u.Images.Select(i => i.ImageUrl ?? i.Url).ToList()
+                Success = false,
+                Count = 0,
+                Users = new List<UserDto>()
             });
+        }
 
-        suggestions.AddRange(remaining);
+        var currentUser = await db.Users
+            .Include(u => u.MusicProfile)
+            .Include(u => u.Images)
+            .FirstOrDefaultAsync(u => u.Id == currentUserId);
+
+        if (currentUser == null)
+        {
+            Console.WriteLine($"❌ User not found with ID: {currentUserId}");
+            return Results.NotFound(new TakeExUsersResponse
+            {
+                Success = false,
+                Count = 0,
+                Users = new List<UserDto>()
+            });
+        }
+
+        if (currentUser.MusicProfile == null)
+        {
+            Console.WriteLine($"⚠️ User {currentUserId} has no music profile");
+            return Results.NotFound(new TakeExUsersResponse
+            {
+                Success = false,
+                Count = 0,
+                Users = new List<UserDto>()
+            });
+        }
+
+        // Get users that this user has already swiped on
+        var swipedUserIds = await db.Likes
+            .Where(l => l.FromUserId == currentUserId)
+            .Select(l => l.ToUserId)
+            .ToListAsync();
+
+        // Load queue items for this user
+        var queueItems = await db.UserSuggestionQueues
+            .Where(q => q.UserId == currentUserId)
+            .OrderBy(q => q.QueuePosition)
+            .ToListAsync();
+
+        var suggestions = new List<UserDto>();
+        int positionCounter = queueItems.Any() ? queueItems.Max(q => q.QueuePosition) + 1 : 0;
+
+        // Get other users (excluding those already swiped)
+        var otherUsers = await db.Users
+            .Include(u => u.MusicProfile)
+            .Include(u => u.Images)
+            .Where(u => u.Id != currentUserId &&
+                       u.MusicProfile != null &&
+                       !swipedUserIds.Contains(u.Id))
+            .ToListAsync();
+
+        foreach (var user in otherUsers)
+        {
+            // Skip if already in queue and score < 60%
+            var existingQueueItem = queueItems.FirstOrDefault(q => q.SuggestedUserId == user.Id);
+            double score;
+
+            if (existingQueueItem != null)
+            {
+                score = existingQueueItem.CompatibilityScore;
+            }
+            else
+            {
+                // Try to calculate compatibility with Gemini
+                int? percentage = null;
+                try
+                {
+                    percentage = await GeminiService.CalculatePercentage(currentUser.MusicProfile, user.MusicProfile!);
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"⚠️ Gemini API error: {ex.Message}");
+                }
+
+                score = percentage ?? 50; // Default to 50% if Gemini fails
+
+                // Add to queue with position
+                var queueItem = new UserSuggestionQueue
+                {
+                    UserId = currentUserId,
+                    SuggestedUserId = user.Id,
+                    QueuePosition = positionCounter++,
+                    CompatibilityScore = score,
+                    CreatedAt = DateTime.UtcNow
+                };
+
+                db.UserSuggestionQueues.Add(queueItem);
+                await db.SaveChangesAsync();
+            }
+
+            if (score >= 60)
+            {
+                suggestions.Add(new UserDto
+                {
+                    Id = user.Id,
+                    Name = user.Name,
+                    Email = user.Email,
+                    Age = user.Age,
+                    Location = user.Location,
+                    Bio = user.Bio,
+                    MusicProfile = new MusicProfileDto
+                    {
+                        FavoriteGenres = user.MusicProfile!.FavoriteGenres,
+                        FavoriteArtists = user.MusicProfile.FavoriteArtists,
+                        FavoriteSongs = user.MusicProfile.FavoriteSongs
+                    },
+                    Images = user.Images.Select(i => i.ImageUrl ?? i.Url).ToList()
+                });
+            }
+        }
+
+        // Ensure at least 10 suggestions, fill with random remaining users if needed
+        if (suggestions.Count < 10)
+        {
+            var remaining = otherUsers
+                .Where(u => !suggestions.Any(s => s.Id == u.Id))
+                .OrderBy(_ => Guid.NewGuid())
+                .Take(10 - suggestions.Count)
+                .Select(u => new UserDto
+                {
+                    Id = u.Id,
+                    Name = u.Name,
+                    Email = u.Email,
+                    Age = u.Age,
+                    Location = u.Location,
+                    Bio = u.Bio,
+                    MusicProfile = new MusicProfileDto
+                    {
+                        FavoriteGenres = u.MusicProfile!.FavoriteGenres,
+                        FavoriteArtists = u.MusicProfile.FavoriteArtists,
+                        FavoriteSongs = u.MusicProfile.FavoriteSongs
+                    },
+                    Images = u.Images.Select(i => i.ImageUrl ?? i.Url).ToList()
+                });
+
+            suggestions.AddRange(remaining);
+        }
+
+        Console.WriteLine($"✅ Returning {suggestions.Count} suggestions for user {currentUserId}");
+
+        return Results.Ok(new TakeExUsersResponse
+        {
+            Success = true,
+            Count = suggestions.Count,
+            Users = suggestions
+        });
     }
-
-    return Results.Ok(new TakeExUsersResponse
+    catch (Exception ex)
     {
-        Success = true,
-        Count = suggestions.Count,
-        Users = suggestions
-    });
-});
+        Console.WriteLine($"❌ Error in /users endpoint: {ex.Message}");
+        Console.WriteLine($"Stack trace: {ex.StackTrace}");
+
+        return Results.Ok(new TakeExUsersResponse
+        {
+            Success = false,
+            Count = 0,
+            Users = new List<UserDto>()
+        });
+    }
+})
+.WithName("GetUsersForSwipe")
+.WithSummary("Get potential matches for a user")
+.WithDescription("Returns users that the specified user can swipe on, ordered by compatibility");
 
 app.MapGet("/health", () => Results.Ok(new { ok = true, now = DateTime.UtcNow }));
+
+// ---- Auto-seed endpoint (can be called manually) ----
+app.MapPost("/seed-database", async (AppDbContext db) =>
+{
+    try
+    {
+        await SeedDatabaseAsync(db);
+        return Results.Ok(new { success = true, message = "Database seeded successfully" });
+    }
+    catch (Exception ex)
+    {
+        return Results.Problem(detail: ex.Message, title: "Seeding failed");
+    }
+});
+
 //Take 10 Example Users from DB
 // ---- NEW: Take 10 Example Users Endpoint ----
 // ---- NEW: Take Random Users & Compare Music Taste ----
@@ -292,63 +375,7 @@ app.MapPost("/test/add-users", async (AppDbContext db) =>
     {
         Console.WriteLine("👥 Adding 100 example users to database...");
 
-        // Clear existing data first
-
-        var random = new Random();
-        var sampleGenres = new[] { "Pop", "Rock", "Hip Hop", "Jazz", "Electronic", "Classical", "Metal", "R&B", "Indie", "Latin" };
-        var sampleArtists = new[] { "Taylor Swift", "Drake", "Arctic Monkeys", "Beyoncé", "Eminem", "Daft Punk", "Bad Bunny", "Mozart", "The Weeknd", "Metallica" };
-        var sampleSongs = new[] { "Anti-Hero", "Blinding Lights", "Do I Wanna Know", "One More Time", "La Vida Es Un Carnaval", "HUMBLE.", "Enter Sandman", "Creep", "Kind of Blue", "Everlong" };
-        var sampleLocations = new[] { "New York, NY", "Los Angeles, CA", "Austin, TX", "Seattle, WA", "Miami, FL", "Chicago, IL", "London, UK", "Berlin, DE", "Paris, FR", "Tel Aviv, IL" };
-
-        var users = new List<User>();
-
-        for (int i = 1; i <= 100; i++)
-        {
-            var name = $"Test User {i}";
-            var email = $"user{i}@example.com";
-            var age = random.Next(18, 40);
-            var location = sampleLocations[random.Next(sampleLocations.Length)];
-            var bio = $"I am {name}, I love music and meeting new people!";
-
-            var user = new User
-            {
-                Name = name,
-                Email = email,
-                Age = age,
-                Location = location,
-                Bio = bio,
-                MusicProfile = new MusicProfile
-                {
-                    FavoriteSongs = string.Join(", ", sampleSongs.OrderBy(_ => random.Next()).Take(3)),
-                    FavoriteArtists = string.Join(", ", sampleArtists.OrderBy(_ => random.Next()).Take(3)),
-                    FavoriteGenres = string.Join(", ", sampleGenres.OrderBy(_ => random.Next()).Take(3))
-                }
-            };
-
-            users.Add(user);
-        }
-
-        await db.Users.AddRangeAsync(users);
-        await db.SaveChangesAsync();
-
-        // Add images
-        var userImages = new List<UserImage>();
-        foreach (var user in users)
-        {
-            userImages.Add(new UserImage
-            {
-                UserId = user.Id,
-                ImageUrl = $"https://picsum.photos/400/600?random={user.Id}1"
-            });
-            userImages.Add(new UserImage
-            {
-                UserId = user.Id,
-                ImageUrl = $"https://picsum.photos/400/600?random={user.Id}2"
-            });
-        }
-
-        await db.UserImages.AddRangeAsync(userImages);
-        await db.SaveChangesAsync();
+        await SeedDatabaseAsync(db);
 
         var savedUsers = await db.Users.Include(u => u.MusicProfile).Include(u => u.Images).ToListAsync();
 
@@ -369,7 +396,8 @@ app.MapPost("/test/add-users", async (AppDbContext db) =>
 })
 .WithName("AddExampleUsers")
 .WithSummary("Add 100 example users to the database")
-.WithDescription("Clears existing data and adds 100 example users with random profiles for testing");
+.WithDescription("Adds 100 example users with random profiles for testing");
+
 app.MapPost("/auth/register", async (
     RegisterRequest request,
     AppDbContext db,
@@ -415,6 +443,7 @@ app.MapPost("/auth/register", async (
         }
     });
 });
+
 app.MapPost("/auth/login", async (
     LoginRequestFromApp request,
     AppDbContext db,
@@ -432,8 +461,7 @@ app.MapPost("/auth/login", async (
     }
 
     // Verify password
-    var result = hasher.VerifyHashedPassword(user, user.PasswordHash!, request.Password);
-    if (result == PasswordVerificationResult.Failed)
+    var result = hasher.VerifyHashedPassword(user, user.PasswordHash ?? "", request.Password); if (result == PasswordVerificationResult.Failed)
     {
         return Results.BadRequest(new
         {
@@ -446,7 +474,7 @@ app.MapPost("/auth/login", async (
     var token = Guid.NewGuid().ToString();
 
     // Optional: handle "RememberMe" if you want longer token lifetime
-    // (right now, it’s just informational)
+    // (right now, it's just informational)
 
     return Results.Ok(new
     {
@@ -463,6 +491,10 @@ app.MapPost("/auth/login", async (
         }
     });
 });
+
+// Keep all other endpoints as they were...
+// [Rest of your endpoints remain the same]
+
 // ---- User Management Endpoints ----
 app.MapPost("/users", Endpoints.CreateUser);
 app.MapGet("/users/{id:int}", Endpoints.GetUser);
@@ -473,8 +505,15 @@ app.MapGet("/users:search", Endpoints.SearchUsers);
 app.MapPost("/users/{id:int}/images", Endpoints.AddUserImage);
 app.MapGet("/users/{id:int}/images", Endpoints.GetUserImages);
 
+// ---- Swiping Endpoints ----
+app.MapGet("/swipe/discover/{userId:int}", SwipeEndpoints.GetPotentialMatches);
+app.MapPost("/swipe", SwipeEndpoints.SwipeOnUser);
+app.MapPost("/swipe/{fromUserId:int}/like/{toUserId:int}", SwipeEndpoints.LikeUser);
+app.MapPost("/swipe/{fromUserId:int}/pass/{toUserId:int}", SwipeEndpoints.PassUser);
+app.MapGet("/matches/{userId:int}", SwipeEndpoints.GetUserMatches);
+app.MapGet("/swipe/stats/{userId:int}", SwipeEndpoints.GetSwipeStats);
+
 // ---- Spotify Integration Endpoints ----
-// Step 1: Redirect user to Spotify login
 app.MapGet("/login", (SpotifyService spotify) =>
 {
     var url = spotify.GetLoginUrl();
@@ -493,33 +532,83 @@ app.MapGet("/callback", async (HttpRequest req, SpotifyService spotify, AppDbCon
     return Results.Ok(new { Message = "Spotify connected!", User = updatedUser });
 });
 
-// Optional: Get current user's Spotify data (if already connected)
-app.MapGet("/spotify/profile", async (SpotifyService spotifyService) =>
-{
-    try
-    {
-        var topArtists = await spotifyService.GetUserTopArtistsAsync();
-        var topSongs = await spotifyService.GetUserTopSongsAsync();
-
-        return Results.Ok(new
-        {
-            TopArtists = topArtists,
-            FavoriteGenres = topSongs
-        });
-    }
-    catch (Exception ex)
-    {
-        return Results.Problem(detail: ex.Message, title: "User not connected to Spotify");
-    }
-});
-
 Console.WriteLine("🎯 Spotilove API is starting...");
+Console.WriteLine($"🌐 Running on port: {port}");
 Console.WriteLine("🤖 Gemini AI compatibility calculation enabled");
 Console.WriteLine("⚙️  Make sure to set GeminiAPIKey environment variable for AI features");
 Console.WriteLine("🧪 Test endpoints available:");
 Console.WriteLine("   - POST /test/add-users - Add example users to database");
-Console.WriteLine("   - GET /test/database - Test with existing database users");
-Console.WriteLine("   - GET /test/swipe - Complete test with Gemini AI compatibility");
-Console.WriteLine("📖 View API documentation at: http://localhost:5106/swagger");
+Console.WriteLine("   - POST /seed-database - Seed database with users");
+Console.WriteLine($"📖 View API documentation at: http://0.0.0.0:{port}/swagger");
 
 app.Run();
+
+// Helper method to seed database
+static async Task SeedDatabaseAsync(AppDbContext db)
+{
+    // Check if users already exist
+    var existingCount = await db.Users.CountAsync();
+    if (existingCount >= 100)
+    {
+        Console.WriteLine($"⚠️ Database already has {existingCount} users. Skipping seed.");
+        return;
+    }
+
+    var random = new Random();
+    var sampleGenres = new[] { "Pop", "Rock", "Hip Hop", "Jazz", "Electronic", "Classical", "Metal", "R&B", "Indie", "Latin" };
+    var sampleArtists = new[] { "Taylor Swift", "Drake", "Arctic Monkeys", "Beyoncé", "Eminem", "Daft Punk", "Bad Bunny", "Mozart", "The Weeknd", "Metallica" };
+    var sampleSongs = new[] { "Anti-Hero", "Blinding Lights", "Do I Wanna Know", "One More Time", "La Vida Es Un Carnaval", "HUMBLE.", "Enter Sandman", "Creep", "Kind of Blue", "Everlong" };
+    var sampleLocations = new[] { "New York, NY", "Los Angeles, CA", "Austin, TX", "Seattle, WA", "Miami, FL", "Chicago, IL", "London, UK", "Berlin, DE", "Paris, FR", "Tel Aviv, IL" };
+
+    var users = new List<User>();
+
+    for (int i = 1; i <= 100; i++)
+    {
+        var name = $"Test User {i}";
+        var email = $"user{i}@example.com";
+        var age = random.Next(18, 40);
+        var location = sampleLocations[random.Next(sampleLocations.Length)];
+        var bio = $"I am {name}, I love music and meeting new people!";
+
+        var user = new User
+        {
+            Name = name,
+            Email = email,
+            Age = age,
+            Location = location,
+            Bio = bio,
+            MusicProfile = new MusicProfile
+            {
+                FavoriteSongs = string.Join(", ", sampleSongs.OrderBy(_ => random.Next()).Take(3)),
+                FavoriteArtists = string.Join(", ", sampleArtists.OrderBy(_ => random.Next()).Take(3)),
+                FavoriteGenres = string.Join(", ", sampleGenres.OrderBy(_ => random.Next()).Take(3))
+            }
+        };
+
+        users.Add(user);
+    }
+
+    await db.Users.AddRangeAsync(users);
+    await db.SaveChangesAsync();
+
+    // Add images
+    var userImages = new List<UserImage>();
+    foreach (var user in users)
+    {
+        userImages.Add(new UserImage
+        {
+            UserId = user.Id,
+            ImageUrl = $"https://picsum.photos/400/600?random={user.Id}1"
+        });
+        userImages.Add(new UserImage
+        {
+            UserId = user.Id,
+            ImageUrl = $"https://picsum.photos/400/600?random={user.Id}2"
+        });
+    }
+
+    await db.UserImages.AddRangeAsync(userImages);
+    await db.SaveChangesAsync();
+
+    Console.WriteLine($"✅ Seeded database with {users.Count} users");
+}
