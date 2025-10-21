@@ -97,6 +97,7 @@ app.MapGet("/", () => Results.Ok(new
 }));
 
 // ---- MODIFIED: More robust /users endpoint with better error handling ----
+// Replace your /users endpoint with this fixed version
 app.MapGet("/users", async (AppDbContext db, HttpRequest request) =>
 {
     try
@@ -161,43 +162,73 @@ app.MapGet("/users", async (AppDbContext db, HttpRequest request) =>
             .OrderBy(q => q.QueuePosition)
             .ToListAsync();
 
+        // Get IDs already in queue to avoid duplicates
+        var queuedUserIds = queueItems.Select(q => q.SuggestedUserId).ToHashSet();
+
         var suggestions = new List<UserDto>();
         int positionCounter = queueItems.Any() ? queueItems.Max(q => q.QueuePosition) + 1 : 0;
 
-        // Get other users (excluding those already swiped)
+        // Get other users (excluding those already swiped AND those already in queue)
         var otherUsers = await db.Users
             .Include(u => u.MusicProfile)
             .Include(u => u.Images)
             .Where(u => u.Id != currentUserId &&
                        u.MusicProfile != null &&
-                       !swipedUserIds.Contains(u.Id))
+                       !swipedUserIds.Contains(u.Id) &&
+                       !queuedUserIds.Contains(u.Id))  // FIXED: Don't add duplicates
             .ToListAsync();
 
+        // Process users already in queue first
+        foreach (var queueItem in queueItems.Where(q => q.CompatibilityScore >= 60))
+        {
+            var user = await db.Users
+                .Include(u => u.MusicProfile)
+                .Include(u => u.Images)
+                .FirstOrDefaultAsync(u => u.Id == queueItem.SuggestedUserId);
+
+            if (user != null && user.MusicProfile != null)
+            {
+                suggestions.Add(new UserDto
+                {
+                    Id = user.Id,
+                    Name = user.Name,
+                    Email = user.Email,
+                    Age = user.Age,
+                    Location = user.Location,
+                    Bio = user.Bio,
+                    MusicProfile = new MusicProfileDto
+                    {
+                        FavoriteGenres = user.MusicProfile.FavoriteGenres,
+                        FavoriteArtists = user.MusicProfile.FavoriteArtists,
+                        FavoriteSongs = user.MusicProfile.FavoriteSongs
+                    },
+                    Images = user.Images.Select(i => i.ImageUrl ?? i.Url).ToList()
+                });
+            }
+        }
+
+        // Now process new users
         foreach (var user in otherUsers)
         {
-            // Skip if already in queue and score < 60%
-            var existingQueueItem = queueItems.FirstOrDefault(q => q.SuggestedUserId == user.Id);
-            double score;
-
-            if (existingQueueItem != null)
+            // Try to calculate compatibility with Gemini
+            int? percentage = null;
+            try
             {
-                score = existingQueueItem.CompatibilityScore;
+                percentage = await GeminiService.CalculatePercentage(currentUser.MusicProfile, user.MusicProfile!);
             }
-            else
+            catch (Exception ex)
             {
-                // Try to calculate compatibility with Gemini
-                int? percentage = null;
-                try
-                {
-                    percentage = await GeminiService.CalculatePercentage(currentUser.MusicProfile, user.MusicProfile!);
-                }
-                catch (Exception ex)
-                {
-                    Console.WriteLine($"⚠️ Gemini API error: {ex.Message}");
-                }
+                Console.WriteLine($"⚠️ Gemini API error: {ex.Message}");
+            }
 
-                score = percentage ?? 50; // Default to 50% if Gemini fails
+            double score = percentage ?? 50; // Default to 50% if Gemini fails
 
+            // FIXED: Check if already exists before adding
+            var existingItem = await db.UserSuggestionQueues
+                .FirstOrDefaultAsync(q => q.UserId == currentUserId && q.SuggestedUserId == user.Id);
+
+            if (existingItem == null)
+            {
                 // Add to queue with position
                 var queueItem = new UserSuggestionQueue
                 {
@@ -209,7 +240,24 @@ app.MapGet("/users", async (AppDbContext db, HttpRequest request) =>
                 };
 
                 db.UserSuggestionQueues.Add(queueItem);
-                await db.SaveChangesAsync();
+
+                try
+                {
+                    await db.SaveChangesAsync();
+                    Console.WriteLine($"✅ Added user {user.Id} to queue with score {score}%");
+                }
+                catch (DbUpdateException dbEx)
+                {
+                    Console.WriteLine($"⚠️ Database error adding to queue: {dbEx.InnerException?.Message ?? dbEx.Message}");
+                    // Continue processing other users even if one fails
+                    db.Entry(queueItem).State = EntityState.Detached;
+                    continue;
+                }
+            }
+            else
+            {
+                score = existingItem.CompatibilityScore;
+                Console.WriteLine($"ℹ️ User {user.Id} already in queue with score {score}%");
             }
 
             if (score >= 60)
@@ -236,7 +284,15 @@ app.MapGet("/users", async (AppDbContext db, HttpRequest request) =>
         // Ensure at least 10 suggestions, fill with random remaining users if needed
         if (suggestions.Count < 10)
         {
-            var remaining = otherUsers
+            var allOtherUsers = await db.Users
+                .Include(u => u.MusicProfile)
+                .Include(u => u.Images)
+                .Where(u => u.Id != currentUserId &&
+                           u.MusicProfile != null &&
+                           !swipedUserIds.Contains(u.Id))
+                .ToListAsync();
+
+            var remaining = allOtherUsers
                 .Where(u => !suggestions.Any(s => s.Id == u.Id))
                 .OrderBy(_ => Guid.NewGuid())
                 .Take(10 - suggestions.Count)
@@ -273,6 +329,10 @@ app.MapGet("/users", async (AppDbContext db, HttpRequest request) =>
     {
         Console.WriteLine($"❌ Error in /users endpoint: {ex.Message}");
         Console.WriteLine($"Stack trace: {ex.StackTrace}");
+        if (ex.InnerException != null)
+        {
+            Console.WriteLine($"Inner exception: {ex.InnerException.Message}");
+        }
 
         return Results.Ok(new TakeExUsersResponse
         {
@@ -284,9 +344,7 @@ app.MapGet("/users", async (AppDbContext db, HttpRequest request) =>
 })
 .WithName("GetUsersForSwipe")
 .WithSummary("Get potential matches for a user")
-.WithDescription("Returns users that the specified user can swipe on, ordered by compatibility");
-
-app.MapGet("/health", () => Results.Ok(new { ok = true, now = DateTime.UtcNow }));
+.WithDescription("Returns users that the specified user can swipe on, ordered by compatibility"); app.MapGet("/health", () => Results.Ok(new { ok = true, now = DateTime.UtcNow }));
 
 // ---- Auto-seed endpoint (can be called manually) ----
 app.MapPost("/seed-database", async (AppDbContext db) =>
