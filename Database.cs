@@ -66,6 +66,79 @@ public class AppDbContext : DbContext
             entity.HasIndex(e => new { e.UserId, e.SuggestedUserId })
                   .IsUnique();
         });
+
+        modelBuilder.Entity<User>()
+            .HasOne(u => u.MusicProfile)
+            .WithOne(m => m.User)
+            .HasForeignKey<MusicProfile>(m => m.UserId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        // User ↔ UserImage (1-many)
+        modelBuilder.Entity<UserImage>()
+            .HasOne(ui => ui.User)
+            .WithMany(u => u.Images)
+            .HasForeignKey(ui => ui.UserId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        // Like relationships
+        modelBuilder.Entity<Like>()
+            .HasOne(l => l.FromUser)
+            .WithMany(u => u.Likes)
+            .HasForeignKey(l => l.FromUserId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        modelBuilder.Entity<Like>()
+            .HasOne(l => l.ToUser)
+            .WithMany()
+            .HasForeignKey(l => l.ToUserId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        // OPTIMIZATION: Composite index for faster like queries
+        modelBuilder.Entity<Like>()
+            .HasIndex(l => new
+            {
+                l.FromUserId,
+                l.ToUserId
+            })
+            .IsUnique();
+
+        // OPTIMIZATION: Index on FromUserId for faster swiped users lookup
+        modelBuilder.Entity<Like>()
+                .HasIndex(l => l.FromUserId);
+
+        // UserSuggestionQueue configuration
+        modelBuilder.Entity<UserSuggestionQueue>(entity =>
+            {
+                entity.HasKey(e => e.Id);
+
+                entity.HasOne(e => e.User)
+                      .WithMany()
+                      .HasForeignKey(e => e.UserId)
+                      .OnDelete(DeleteBehavior.Cascade);
+
+                entity.HasOne(e => e.SuggestedUser)
+                      .WithMany()
+                      .HasForeignKey(e => e.SuggestedUserId)
+                      .OnDelete(DeleteBehavior.Restrict);
+
+                // OPTIMIZATION: Composite index for queue position lookups
+                entity.HasIndex(e => new { e.UserId, e.QueuePosition });
+
+                // OPTIMIZATION: Unique constraint with proper ordering
+                entity.HasIndex(e => new { e.UserId, e.SuggestedUserId })
+              .IsUnique();
+
+                // OPTIMIZATION: Index for score-based queries
+                entity.HasIndex(e => new { e.UserId, e.CompatibilityScore });
+            });
+
+        // OPTIMIZATION: Index on User.Id for faster lookups (if not already implicit)
+        modelBuilder.Entity<User>()
+            .HasIndex(u => u.Id);
+
+        // OPTIMIZATION: Index on Email for auth lookups
+        modelBuilder.Entity<User>()
+            .HasIndex(u => u.Email);
     }
 }
 
