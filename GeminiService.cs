@@ -17,7 +17,7 @@ public class GeminiService
         try
         {
             string? GeminiApi = Environment.GetEnvironmentVariable("GeminiAPIKey");
-            string url = $"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GeminiApi}";
+            string url = $"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={GeminiApi}";
             string prompt = $@"You are an assistant that calculates music compatibility between two people based on their music taste.
 Each person’s data includes:
 
