@@ -15,21 +15,21 @@ public class AppDbContext : DbContext
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
-        // User ↔ MusicProfile (1-1)
+        // ===== User ↔ MusicProfile (1-1) =====
         modelBuilder.Entity<User>()
             .HasOne(u => u.MusicProfile)
             .WithOne(m => m.User)
             .HasForeignKey<MusicProfile>(m => m.UserId)
             .OnDelete(DeleteBehavior.Cascade);
 
-        // User ↔ UserImage (1-many)
+        // ===== User ↔ UserImage (1-many) =====
         modelBuilder.Entity<UserImage>()
             .HasOne(ui => ui.User)
             .WithMany(u => u.Images)
             .HasForeignKey(ui => ui.UserId)
             .OnDelete(DeleteBehavior.Cascade);
 
-        // Like relationships
+        // ===== Like Relationships =====
         modelBuilder.Entity<Like>()
             .HasOne(l => l.FromUser)
             .WithMany(u => u.Likes)
@@ -42,12 +42,12 @@ public class AppDbContext : DbContext
             .HasForeignKey(l => l.ToUserId)
             .OnDelete(DeleteBehavior.Restrict);
 
-        // Unique index to prevent duplicate likes
+        // OPTIMIZATION: Composite unique index (prevents duplicates + faster queries)
         modelBuilder.Entity<Like>()
             .HasIndex(l => new { l.FromUserId, l.ToUserId })
             .IsUnique();
 
-        // UserSuggestionQueue configuration
+        // ===== UserSuggestionQueue Configuration =====
         modelBuilder.Entity<UserSuggestionQueue>(entity =>
         {
             entity.HasKey(e => e.Id);
@@ -62,79 +62,16 @@ public class AppDbContext : DbContext
                   .HasForeignKey(e => e.SuggestedUserId)
                   .OnDelete(DeleteBehavior.Restrict);
 
+            // OPTIMIZATION: Composite index for queue position lookups
             entity.HasIndex(e => new { e.UserId, e.QueuePosition });
+
+            // OPTIMIZATION: Unique constraint to prevent duplicate suggestions
             entity.HasIndex(e => new { e.UserId, e.SuggestedUserId })
                   .IsUnique();
+
+            // OPTIMIZATION: Index for score-based queries
+            entity.HasIndex(e => new { e.UserId, e.CompatibilityScore });
         });
-
-        modelBuilder.Entity<User>()
-            .HasOne(u => u.MusicProfile)
-            .WithOne(m => m.User)
-            .HasForeignKey<MusicProfile>(m => m.UserId)
-            .OnDelete(DeleteBehavior.Cascade);
-
-        // User ↔ UserImage (1-many)
-        modelBuilder.Entity<UserImage>()
-            .HasOne(ui => ui.User)
-            .WithMany(u => u.Images)
-            .HasForeignKey(ui => ui.UserId)
-            .OnDelete(DeleteBehavior.Cascade);
-
-        // Like relationships
-        modelBuilder.Entity<Like>()
-            .HasOne(l => l.FromUser)
-            .WithMany(u => u.Likes)
-            .HasForeignKey(l => l.FromUserId)
-            .OnDelete(DeleteBehavior.Restrict);
-
-        modelBuilder.Entity<Like>()
-            .HasOne(l => l.ToUser)
-            .WithMany()
-            .HasForeignKey(l => l.ToUserId)
-            .OnDelete(DeleteBehavior.Restrict);
-
-        // OPTIMIZATION: Composite index for faster like queries
-        modelBuilder.Entity<Like>()
-            .HasIndex(l => new
-            {
-                l.FromUserId,
-                l.ToUserId
-            })
-            .IsUnique();
-
-        // OPTIMIZATION: Index on FromUserId for faster swiped users lookup
-        modelBuilder.Entity<Like>()
-                .HasIndex(l => l.FromUserId);
-
-        // UserSuggestionQueue configuration
-        modelBuilder.Entity<UserSuggestionQueue>(entity =>
-            {
-                entity.HasKey(e => e.Id);
-
-                entity.HasOne(e => e.User)
-                      .WithMany()
-                      .HasForeignKey(e => e.UserId)
-                      .OnDelete(DeleteBehavior.Cascade);
-
-                entity.HasOne(e => e.SuggestedUser)
-                      .WithMany()
-                      .HasForeignKey(e => e.SuggestedUserId)
-                      .OnDelete(DeleteBehavior.Restrict);
-
-                // OPTIMIZATION: Composite index for queue position lookups
-                entity.HasIndex(e => new { e.UserId, e.QueuePosition });
-
-                // OPTIMIZATION: Unique constraint with proper ordering
-                entity.HasIndex(e => new { e.UserId, e.SuggestedUserId })
-              .IsUnique();
-
-                // OPTIMIZATION: Index for score-based queries
-                entity.HasIndex(e => new { e.UserId, e.CompatibilityScore });
-            });
-
-        // OPTIMIZATION: Index on User.Id for faster lookups (if not already implicit)
-        modelBuilder.Entity<User>()
-            .HasIndex(u => u.Id);
 
         // OPTIMIZATION: Index on Email for auth lookups
         modelBuilder.Entity<User>()
@@ -142,7 +79,7 @@ public class AppDbContext : DbContext
     }
 }
 
-// ENTITIES
+// ===== ENTITIES =====
 public class User
 {
     public int Id { get; set; }
@@ -211,7 +148,7 @@ public class UserSuggestionQueue
     public User SuggestedUser { get; set; } = null!;
 }
 
-// PASSWORD UTILS
+// ===== PASSWORD UTILS =====
 public static class PasswordHasher
 {
     public static string HashPassword(string password)
@@ -228,7 +165,7 @@ public static class PasswordHasher
     }
 }
 
-// DTOs
+// ===== DTOs =====
 public class MusicProfileDto
 {
     public string? FavoriteSongs { get; set; }
@@ -253,6 +190,7 @@ public class TakeExUsersResponse
     public bool Success { get; set; }
     public int Count { get; set; }
     public List<UserDto> Users { get; set; } = new();
+    public string? Message { get; set; }
 }
 
 public class RegisterRequest
@@ -273,10 +211,27 @@ public class LoginRequestFromApp
     public int Id { get; set; }
 }
 
-// Endpoints
+public class BatchCalculateRequest
+{
+    public int CurrentUserId { get; set; }
+    public List<int> UserIds { get; set; } = new();
+}
+
+public class CompatibilityResult
+{
+    public int UserId { get; set; }
+    public string Name { get; set; } = string.Empty;
+    public int Age { get; set; }
+    public string? Location { get; set; }
+    public string? Bio { get; set; }
+    public double CompatibilityScore { get; set; }
+    public MusicProfileDto? MusicProfile { get; set; }
+    public List<string> Images { get; set; } = new();
+}
+
+// ===== ENDPOINTS =====
 public static class Endpoints
 {
-    // User endpoints
     public static async Task<IResult> CreateUser(AppDbContext db, CreateUserDto dto)
     {
         var user = new User
@@ -298,14 +253,22 @@ public static class Endpoints
 
     public static async Task<IResult> GetUser(AppDbContext db, int id)
     {
-        var user = await db.Users.Include(u => u.MusicProfile).Include(u => u.Images).FirstOrDefaultAsync(u => u.Id == id);
+        var user = await db.Users
+            .Include(u => u.MusicProfile)
+            .Include(u => u.Images)
+            .AsNoTracking()
+            .FirstOrDefaultAsync(u => u.Id == id);
+
         if (user == null) return Results.NotFound("User not found");
         return Results.Ok(user);
     }
 
     public static async Task<IResult> UpdateProfile(AppDbContext db, int id, UpdateProfileDto dto)
     {
-        var user = await db.Users.Include(u => u.MusicProfile).FirstOrDefaultAsync(u => u.Id == id);
+        var user = await db.Users
+            .Include(u => u.MusicProfile)
+            .FirstOrDefaultAsync(u => u.Id == id);
+
         if (user == null) return Results.NotFound("User not found");
         if (user.MusicProfile == null) return Results.BadRequest("User has no music profile");
 
@@ -319,11 +282,15 @@ public static class Endpoints
 
     public static async Task<IResult> SearchUsers(AppDbContext db)
     {
-        var users = await db.Users.Include(u => u.MusicProfile).Include(u => u.Images).ToListAsync();
+        var users = await db.Users
+            .Include(u => u.MusicProfile)
+            .Include(u => u.Images)
+            .AsNoTracking()
+            .ToListAsync();
+
         return Results.Ok(users);
     }
 
-    // User Image endpoints
     public static async Task<IResult> AddUserImage(AppDbContext db, int id, UserImage image)
     {
         var user = await db.Users.FirstOrDefaultAsync(u => u.Id == id);
@@ -338,23 +305,18 @@ public static class Endpoints
 
     public static async Task<IResult> GetUserImages(AppDbContext db, int id)
     {
-        var user = await db.Users.Include(u => u.Images).FirstOrDefaultAsync(u => u.Id == id);
+        var user = await db.Users
+            .Include(u => u.Images)
+            .AsNoTracking()
+            .FirstOrDefaultAsync(u => u.Id == id);
+
         if (user == null) return Results.NotFound("User not found");
 
         return Results.Ok(user.Images);
     }
-
-    private static double Jaccard(string[] a, string[] b)
-    {
-        var setA = new HashSet<string>(a, StringComparer.OrdinalIgnoreCase);
-        var setB = new HashSet<string>(b, StringComparer.OrdinalIgnoreCase);
-        var intersection = setA.Intersect(setB).Count();
-        var union = setA.Union(setB).Count();
-        return union == 0 ? 0 : (double)intersection / union;
-    }
 }
 
-// REQUEST/RECORDS
+// ===== REQUEST/RECORDS =====
 public record CreateUserDto(string Name, int Age, string Gender, string Genres, string Artists, string Songs = "");
 public record UpdateProfileDto(string Genres, string Artists, string Songs = "");
 public record LikeDto(int FromUserId, int ToUserId, bool IsLike);

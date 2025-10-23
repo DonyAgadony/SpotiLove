@@ -3,6 +3,7 @@ using Spotilove;
 using DotNetEnv;
 using Microsoft.AspNetCore.Identity;
 using System.Text.Json.Serialization;
+using static Spotilove.AppDbContext;
 
 DotNetEnv.Env.Load(); // load .env file
 
@@ -95,205 +96,356 @@ app.MapGet("/", () => Results.Ok(new
         swagger = "/swagger"
     }
 }));
+// Add this to your Program.cs
 
-// OPTIMIZED /users endpoint - Replace your existing one
+// ---- OPTIMIZED: Batch Compatibility Calculation ----
+app.MapPost("/swipe/batch-calculate", async (AppDbContext db, BatchCalculateRequest request) =>
+{
+    try
+    {
+        Console.WriteLine($"🎯 Batch calculating compatibility for user {request.CurrentUserId} with {request.UserIds.Count} users...");
+
+        var currentUser = await db.Users
+            .Include(u => u.MusicProfile)
+            .AsNoTracking()
+            .FirstOrDefaultAsync(u => u.Id == request.CurrentUserId);
+
+        if (currentUser?.MusicProfile == null)
+        {
+            return Results.BadRequest(new { success = false, message = "Current user not found or has no music profile" });
+        }
+
+        // Fetch all target users in ONE query
+        var targetUsers = await db.Users
+            .Include(u => u.MusicProfile)
+            .Include(u => u.Images)
+            .Where(u => request.UserIds.Contains(u.Id) && u.MusicProfile != null)
+            .AsNoTracking()
+            .ToListAsync();
+
+        if (!targetUsers.Any())
+        {
+            return Results.Ok(new { success = true, results = new List<CompatibilityResult>() });
+        }
+
+        // OPTION 1: Use local Jaccard calculation (INSTANT - no API calls)
+        var localResults = targetUsers.Select(user => new CompatibilityResult
+        {
+            UserId = user.Id,
+            Name = user.Name,
+            Age = user.Age,
+            Location = user.Location,
+            Bio = user.Bio,
+            CompatibilityScore = CalculateLocalCompatibility(currentUser.MusicProfile, user.MusicProfile!),
+            MusicProfile = new MusicProfileDto
+            {
+                FavoriteGenres = user.MusicProfile!.FavoriteGenres,
+                FavoriteArtists = user.MusicProfile.FavoriteArtists,
+                FavoriteSongs = user.MusicProfile.FavoriteSongs
+            },
+            Images = user.Images.Select(i => i.ImageUrl ?? i.Url).ToList()
+        }).OrderByDescending(r => r.CompatibilityScore).ToList();
+
+        // OPTION 2: Batch Gemini calls in parallel (if you want AI scores)
+        // Uncomment this if you want to use Gemini instead:
+        /*
+        var geminiTasks = targetUsers.Select(async user =>
+        {
+            var score = await GeminiService.CalculatePercentage(currentUser.MusicProfile, user.MusicProfile!);
+            return new CompatibilityResult
+            {
+                UserId = user.Id,
+                Name = user.Name,
+                Age = user.Age,
+                Location = user.Location,
+                Bio = user.Bio,
+                CompatibilityScore = score ?? CalculateLocalCompatibility(currentUser.MusicProfile, user.MusicProfile!),
+                MusicProfile = new MusicProfileDto
+                {
+                    FavoriteGenres = user.MusicProfile!.FavoriteGenres,
+                    FavoriteArtists = user.MusicProfile.FavoriteArtists,
+                    FavoriteSongs = user.MusicProfile.FavoriteSongs
+                },
+                Images = user.Images.Select(i => i.ImageUrl ?? i.Url).ToList()
+            };
+        }).ToList();
+
+        var geminiResults = await Task.WhenAll(geminiTasks);
+        var results = geminiResults.OrderByDescending(r => r.CompatibilityScore).ToList();
+        */
+
+        // Batch insert to queue (ONE database operation)
+        var queueItems = localResults.Select((result, index) => new UserSuggestionQueue
+        {
+            UserId = request.CurrentUserId,
+            SuggestedUserId = result.UserId,
+            QueuePosition = index,
+            CompatibilityScore = result.CompatibilityScore,
+            CreatedAt = DateTime.UtcNow
+        }).ToList();
+
+        try
+        {
+            db.UserSuggestionQueues.AddRange(queueItems);
+            await db.SaveChangesAsync();
+            Console.WriteLine($"✅ Batch inserted {queueItems.Count} compatibility scores");
+        }
+        catch (DbUpdateException ex)
+        {
+            Console.WriteLine($"⚠️ Some users already in queue: {ex.InnerException?.Message}");
+        }
+
+        return Results.Ok(new
+        {
+            success = true,
+            processedCount = localResults.Count,
+            results = localResults
+        });
+    }
+    catch (Exception ex)
+    {
+        Console.WriteLine($"❌ Batch calculation error: {ex.Message}");
+        return Results.Problem(detail: ex.Message, statusCode: 500);
+    }
+})
+.WithName("BatchCalculateCompatibility")
+.WithSummary("Calculate compatibility scores for multiple users at once");
 app.MapGet("/users", async (AppDbContext db, HttpRequest request) =>
 {
     try
     {
-        if (!request.Query.ContainsKey("userId") || !int.TryParse(request.Query["userId"], out int currentUserId))
+        // Parse query parameters
+        if (!request.Query.ContainsKey("userId") ||
+            !int.TryParse(request.Query["userId"], out int currentUserId))
         {
-            return Results.BadRequest(new TakeExUsersResponse { Success = false, Count = 0, Users = new() });
+            return Results.BadRequest(new TakeExUsersResponse
+            {
+                Success = false,
+                Count = 0,
+                Users = new()
+            });
         }
 
-        // OPTIMIZATION 1: Single query to get current user with profile
+        // Optional: Allow requesting more users (default 10, max 50)
+        int requestedCount = 10;
+        if (request.Query.ContainsKey("count") &&
+            int.TryParse(request.Query["count"], out int count))
+        {
+            requestedCount = Math.Clamp(count, 1, 50);
+        }
+
+        // OPTIMIZATION 1: Single query for current user
         var currentUser = await db.Users
             .Include(u => u.MusicProfile)
-            .AsNoTracking()  // No tracking for read-only data
+            .AsNoTracking()
             .FirstOrDefaultAsync(u => u.Id == currentUserId);
 
         if (currentUser?.MusicProfile == null)
         {
-            return Results.NotFound(new TakeExUsersResponse { Success = false, Count = 0, Users = new() });
+            return Results.NotFound(new TakeExUsersResponse
+            {
+                Success = false,
+                Count = 0,
+                Users = new()
+            });
         }
 
-        // OPTIMIZATION 2: Parallel queries for swiped and queued users
+        // OPTIMIZATION 2: Parallel data fetching (3 queries at once)
         var swipedTask = db.Likes
-     .AsNoTracking() // ✅ Apply here while still entity query
-     .Where(l => l.FromUserId == currentUserId)
-     .Select(l => l.ToUserId)
-     .ToListAsync();
+            .Where(l => l.FromUserId == currentUserId)
+            .AsNoTracking()
+            .Select(l => l.ToUserId)
+            .ToListAsync();
 
         var queueTask = db.UserSuggestionQueues
-            .Where(q => q.UserId == currentUserId)
+            .Where(q => q.UserId == currentUserId && q.CompatibilityScore >= 50)
             .OrderByDescending(q => q.CompatibilityScore)
+            .ThenBy(q => q.QueuePosition)
             .AsNoTracking()
             .ToListAsync();
 
-        await Task.WhenAll(swipedTask, queueTask);
+        var totalUsersTask = db.Users
+            .Where(u => u.Id != currentUserId && u.MusicProfile != null)
+            .CountAsync();
+
+        await Task.WhenAll(swipedTask, queueTask, totalUsersTask);
 
         var swipedUserIds = swipedTask.Result.ToHashSet();
         var queueItems = queueTask.Result;
+        var totalAvailable = totalUsersTask.Result;
+
+        Console.WriteLine($"📊 User {currentUserId}: {queueItems.Count} queued, {swipedUserIds.Count} swiped, {totalAvailable} total");
+
+        // OPTIMIZATION 3: Check if we need to populate queue
         var queuedUserIds = queueItems.Select(q => q.SuggestedUserId).ToHashSet();
+        bool needsQueueRefill = queueItems.Count < requestedCount * 2;
 
-        var suggestions = new List<UserDto>();
-
-        // OPTIMIZATION 3: Return users from existing queue first (no Gemini calls needed)
-        var queueUserIds = queueItems.Where(q => q.CompatibilityScore >= 60).Take(10).Select(q => q.SuggestedUserId).ToList();
-
-        if (queueUserIds.Any())
+        if (needsQueueRefill && totalAvailable > swipedUserIds.Count + queuedUserIds.Count)
         {
-            var queuedUsers = await db.Users
-                .Include(u => u.MusicProfile)
-                .Include(u => u.Images)
-                .Where(u => queueUserIds.Contains(u.Id))
-                .AsNoTracking()
-                .ToListAsync();
+            // BATCH PROCESS: Calculate scores for multiple users at once
+            int batchSize = Math.Min(50, requestedCount * 3);
 
-            suggestions.AddRange(queuedUsers.Select(u => new UserDto
-            {
-                Id = u.Id,
-                Name = u.Name,
-                Email = u.Email,
-                Age = u.Age,
-                Location = u.Location,
-                Bio = u.Bio,
-                MusicProfile = new MusicProfileDto
-                {
-                    FavoriteGenres = u.MusicProfile!.FavoriteGenres,
-                    FavoriteArtists = u.MusicProfile.FavoriteArtists,
-                    FavoriteSongs = u.MusicProfile.FavoriteSongs
-                },
-                Images = u.Images.Select(i => i.ImageUrl ?? i.Url).ToList()
-            }));
-        }
-
-        // OPTIMIZATION 4: Only fetch new users if we need more suggestions
-        if (suggestions.Count < 10)
-        {
-            var needed = 10 - suggestions.Count;
-
-            // Get new users batch (limit to 5 to avoid too many Gemini calls)
-            var newUsers = await db.Users
-                .Include(u => u.MusicProfile)
-                .Include(u => u.Images)
+            var candidateIds = await db.Users
                 .Where(u => u.Id != currentUserId &&
                            u.MusicProfile != null &&
                            !swipedUserIds.Contains(u.Id) &&
                            !queuedUserIds.Contains(u.Id))
                 .AsNoTracking()
-                .Take(Math.Min(needed, 5))  // Limit Gemini calls
+                .Select(u => u.Id)
+                .Take(batchSize)
                 .ToListAsync();
 
-            // OPTIMIZATION 5: Batch process with background queue updates
-            var batchInserts = new List<UserSuggestionQueue>();
-            int positionCounter = queueItems.Any() ? queueItems.Max(q => q.QueuePosition) + 1 : 0;
-
-            foreach (var user in newUsers)
+            if (candidateIds.Any())
             {
-                // Use local Jaccard calculation as fallback (instant, no API call)
-                double score = CalculateLocalCompatibility(currentUser.MusicProfile, user.MusicProfile!);
+                Console.WriteLine($"🔄 Batch processing {candidateIds.Count} new candidates...");
 
-                // Add to batch insert list
-                batchInserts.Add(new UserSuggestionQueue
-                {
-                    UserId = currentUserId,
-                    SuggestedUserId = user.Id,
-                    QueuePosition = positionCounter++,
-                    CompatibilityScore = score,
-                    CreatedAt = DateTime.UtcNow
-                });
+                // Fetch all candidates in ONE query
+                var candidates = await db.Users
+                    .Include(u => u.MusicProfile)
+                    .Where(u => candidateIds.Contains(u.Id))
+                    .AsNoTracking()
+                    .ToListAsync();
 
-                if (score >= 60)
-                {
-                    suggestions.Add(new UserDto
+                // PARALLEL LOCAL CALCULATION (instant, no API calls)
+                var scoredCandidates = candidates
+                    .AsParallel() // Use parallel processing for speed
+                    .Select(user => new
                     {
-                        Id = user.Id,
-                        Name = user.Name,
-                        Email = user.Email,
-                        Age = user.Age,
-                        Location = user.Location,
-                        Bio = user.Bio,
-                        MusicProfile = new MusicProfileDto
-                        {
-                            FavoriteGenres = user.MusicProfile!.FavoriteGenres,
-                            FavoriteArtists = user.MusicProfile.FavoriteArtists,
-                            FavoriteSongs = user.MusicProfile.FavoriteSongs
-                        },
-                        Images = user.Images.Select(i => i.ImageUrl ?? i.Url).ToList()
-                    });
-                }
-            }
+                        UserId = user.Id,
+                        Score = CalculateLocalCompatibility(
+                            currentUser.MusicProfile,
+                            user.MusicProfile!)
+                    })
+                    .OrderByDescending(x => x.Score)
+                    .ToList();
 
-            // OPTIMIZATION 6: Batch insert to queue (single DB call)
-            if (batchInserts.Any())
-            {
+                // BATCH INSERT to queue (single DB operation)
+                int nextPosition = queueItems.Any()
+                    ? queueItems.Max(q => q.QueuePosition) + 1
+                    : 0;
+
+                var batchInserts = scoredCandidates.Select((scored, index) =>
+                    new UserSuggestionQueue
+                    {
+                        UserId = currentUserId,
+                        SuggestedUserId = scored.UserId,
+                        QueuePosition = nextPosition + index,
+                        CompatibilityScore = scored.Score,
+                        CreatedAt = DateTime.UtcNow
+                    }).ToList();
+
                 try
                 {
                     db.UserSuggestionQueues.AddRange(batchInserts);
                     await db.SaveChangesAsync();
+                    Console.WriteLine($"✅ Batch inserted {batchInserts.Count} queue items");
+
+                    // Merge new items into queue for immediate use
+                    queueItems.AddRange(batchInserts);
+                    queueItems = queueItems
+                        .OrderByDescending(q => q.CompatibilityScore)
+                        .Take(requestedCount * 3)
+                        .ToList();
+
+                    // Fire-and-forget: Update with Gemini scores in background
+                    var idsToUpdate = scoredCandidates
+                        .Where(s => s.Score >= 60)
+                        .Take(10)
+                        .Select(s => s.UserId)
+                        .ToList();
+
+                    if (idsToUpdate.Any())
+                    {
+                        _ = Task.Run(() => UpdateQueueScoresInBackground(
+                            currentUserId,
+                            idsToUpdate));
+                    }
                 }
                 catch (DbUpdateException ex)
                 {
-                    Console.WriteLine($"⚠️ Batch insert warning: {ex.InnerException?.Message}");
-                    // Continue anyway - we have suggestions to return
+                    Console.WriteLine($"⚠️ Batch insert conflict: {ex.InnerException?.Message}");
                 }
             }
-
-            // OPTIMIZATION 7: Fire-and-forget Gemini updates in background
-            _ = Task.Run(async () => await UpdateQueueScoresInBackground(currentUserId, batchInserts.Select(b => b.SuggestedUserId).ToList()));
         }
 
-        // Fill with random users if still under 10
-        if (suggestions.Count < 10)
+        // OPTIMIZATION 4: Get top suggestions from queue
+        var topSuggestionIds = queueItems
+            .Take(requestedCount)
+            .Select(q => q.SuggestedUserId)
+            .ToList();
+
+        if (!topSuggestionIds.Any())
         {
-            var remaining = await db.Users
-                .Include(u => u.MusicProfile)
-                .Include(u => u.Images)
-                .Where(u => u.Id != currentUserId &&
-                           u.MusicProfile != null &&
-                           !swipedUserIds.Contains(u.Id) &&
-                           !suggestions.Select(s => s.Id).Contains(u.Id))
-                .AsNoTracking()
-                .OrderBy(_ => Guid.NewGuid())
-                .Take(10 - suggestions.Count)
-                .Select(u => new UserDto
-                {
-                    Id = u.Id,
-                    Name = u.Name,
-                    Email = u.Email,
-                    Age = u.Age,
-                    Location = u.Location,
-                    Bio = u.Bio,
-                    MusicProfile = new MusicProfileDto
-                    {
-                        FavoriteGenres = u.MusicProfile!.FavoriteGenres,
-                        FavoriteArtists = u.MusicProfile.FavoriteArtists,
-                        FavoriteSongs = u.MusicProfile.FavoriteSongs
-                    },
-                    Images = u.Images.Select(i => i.ImageUrl ?? i.Url).ToList()
-                })
-                .ToListAsync();
-
-            suggestions.AddRange(remaining);
+            return Results.Ok(new TakeExUsersResponse
+            {
+                Success = true,
+                Count = 0,
+                Users = new(),
+                Message = "No more users available"
+            });
         }
+
+        // OPTIMIZATION 5: Fetch user details in ONE query
+        var users = await db.Users
+            .Include(u => u.MusicProfile)
+            .Include(u => u.Images)
+            .Where(u => topSuggestionIds.Contains(u.Id))
+            .AsNoTracking()
+            .ToListAsync();
+
+        // Preserve queue ordering
+        var userDict = users.ToDictionary(u => u.Id);
+        var orderedUsers = topSuggestionIds
+            .Where(id => userDict.ContainsKey(id))
+            .Select(id => userDict[id])
+            .ToList();
+
+        // Convert to DTOs
+        var suggestions = orderedUsers.Select(ToUserDto).ToList();
 
         return Results.Ok(new TakeExUsersResponse
         {
             Success = true,
             Count = suggestions.Count,
-            Users = suggestions
+            Users = suggestions,
+            Message = $"Returned {suggestions.Count} users ({queueItems.Count} in queue)"
         });
     }
     catch (Exception ex)
     {
-        Console.WriteLine($"❌ Error: {ex.Message}");
-        return Results.Ok(new TakeExUsersResponse { Success = false, Count = 0, Users = new() });
+        Console.WriteLine($"❌ Error in /users: {ex.Message}\n{ex.StackTrace}");
+        return Results.Ok(new TakeExUsersResponse
+        {
+            Success = false,
+            Count = 0,
+            Users = new(),
+            Message = $"Error: {ex.Message}"
+        });
     }
 })
-.WithName("GetUsersForSwipe");
+.WithName("GetUsersForSwipe")
+.WithSummary("Get personalized user suggestions with smart caching")
+.WithDescription("Returns users sorted by compatibility score. Supports ?userId={id}&count={1-50}");
 
-// OPTIMIZATION 8: Local Jaccard calculation (instant fallback)
+// ===== HELPER FUNCTIONS =====
+
+static UserDto ToUserDto(User user) => new()
+{
+    Id = user.Id,
+    Name = user.Name,
+    Email = user.Email,
+    Age = user.Age,
+    Location = user.Location,
+    Bio = user.Bio,
+    MusicProfile = new MusicProfileDto
+    {
+        FavoriteGenres = user.MusicProfile!.FavoriteGenres,
+        FavoriteArtists = user.MusicProfile.FavoriteArtists,
+        FavoriteSongs = user.MusicProfile.FavoriteSongs
+    },
+    Images = user.Images.Select(i => i.ImageUrl ?? i.Url).ToList()
+};
+
 static double CalculateLocalCompatibility(MusicProfile p1, MusicProfile p2)
 {
     double genreScore = JaccardSimilarity(p1.FavoriteGenres, p2.FavoriteGenres);
@@ -320,78 +472,89 @@ static double JaccardSimilarity(string a, string b)
     return union == 0 ? 0 : (double)intersection / union * 100;
 }
 
-// OPTIMIZATION 9: Background Gemini updates (non-blocking)
 static async Task UpdateQueueScoresInBackground(int userId, List<int> suggestedUserIds)
 {
     try
     {
-        // Create a new scope for background work
+        Console.WriteLine($"🤖 Starting background Gemini updates for {suggestedUserIds.Count} users...");
+
         var optionsBuilder = new DbContextOptionsBuilder<AppDbContext>();
         optionsBuilder.UseSqlite("Data Source=spotilove.db");
 
         using var db = new AppDbContext(optionsBuilder.Options);
 
-        var currentUser = await db.Users.Include(u => u.MusicProfile).FirstOrDefaultAsync(u => u.Id == userId);
-        if (currentUser?.MusicProfile == null) return;
+        var currentUser = await db.Users
+            .Include(u => u.MusicProfile)
+            .AsNoTracking()
+            .FirstOrDefaultAsync(u => u.Id == userId);
 
+        if (currentUser?.MusicProfile == null)
+        {
+            Console.WriteLine("⚠️ Current user not found in background task");
+            return;
+        }
+
+        int successCount = 0;
+        int failCount = 0;
+
+        // Process users with rate limiting
         foreach (var suggestedId in suggestedUserIds)
         {
-            var suggestedUser = await db.Users.Include(u => u.MusicProfile).FirstOrDefaultAsync(u => u.Id == suggestedId);
-            if (suggestedUser?.MusicProfile == null) continue;
-
             try
             {
-                var geminiScore = await GeminiService.CalculatePercentage(currentUser.MusicProfile, suggestedUser.MusicProfile);
+                var suggestedUser = await db.Users
+                    .Include(u => u.MusicProfile)
+                    .AsNoTracking()
+                    .FirstOrDefaultAsync(u => u.Id == suggestedId);
+
+                if (suggestedUser?.MusicProfile == null)
+                {
+                    Console.WriteLine($"⚠️ Suggested user {suggestedId} not found");
+                    continue;
+                }
+
+                var geminiScore = await GeminiService.CalculatePercentage(
+                    currentUser.MusicProfile,
+                    suggestedUser.MusicProfile);
 
                 if (geminiScore.HasValue)
                 {
                     var queueItem = await db.UserSuggestionQueues
-                        .FirstOrDefaultAsync(q => q.UserId == userId && q.SuggestedUserId == suggestedId);
+                        .FirstOrDefaultAsync(q =>
+                            q.UserId == userId &&
+                            q.SuggestedUserId == suggestedId);
 
                     if (queueItem != null)
                     {
                         queueItem.CompatibilityScore = geminiScore.Value;
                         await db.SaveChangesAsync();
-                        Console.WriteLine($"✅ Updated score for user {suggestedId}: {geminiScore}%");
+                        successCount++;
+                        Console.WriteLine($"✅ Gemini score for user {suggestedId}: {geminiScore}% (was {queueItem.CompatibilityScore}%)");
                     }
                 }
+                else
+                {
+                    failCount++;
+                    Console.WriteLine($"⚠️ Gemini returned null for user {suggestedId}");
+                }
+
+                // Rate limit: 500ms between calls
+                await Task.Delay(500);
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"⚠️ Background Gemini update failed for user {suggestedId}: {ex.Message}");
+                failCount++;
+                Console.WriteLine($"❌ Gemini failed for user {suggestedId}: {ex.Message}");
             }
-
-            // Rate limit: wait between calls
-            await Task.Delay(500);
         }
+
+        Console.WriteLine($"🎯 Background update complete: {successCount} success, {failCount} failed");
     }
     catch (Exception ex)
     {
-        Console.WriteLine($"⚠️ Background update error: {ex.Message}");
+        Console.WriteLine($"❌ Background update error: {ex.Message}\n{ex.StackTrace}");
     }
 }
-app.MapGet("/health", () => Results.Ok(new { ok = true, now = DateTime.UtcNow }));
-
-
-// 🧩 Helper
-static UserDto ToUserDto(User user) => new()
-{
-    Id = user.Id,
-    Name = user.Name,
-    Email = user.Email,
-    Age = user.Age,
-    Location = user.Location,
-    Bio = user.Bio,
-    MusicProfile = new MusicProfileDto
-    {
-        FavoriteGenres = user.MusicProfile!.FavoriteGenres,
-        FavoriteArtists = user.MusicProfile.FavoriteArtists,
-        FavoriteSongs = user.MusicProfile.FavoriteSongs
-    },
-    Images = user.Images.Select(i => i.ImageUrl ?? i.Url).ToList()
-};
-
-
 // ---- Auto-seed endpoint (can be called manually) ----
 app.MapPost("/seed-database", async (AppDbContext db) =>
 {
