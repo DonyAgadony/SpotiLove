@@ -96,120 +96,7 @@ app.MapGet("/", () => Results.Ok(new
         swagger = "/swagger"
     }
 }));
-// Add this to your Program.cs
 
-// ---- OPTIMIZED: Batch Compatibility Calculation ----
-app.MapPost("/swipe/batch-calculate", async (AppDbContext db, BatchCalculateRequest request) =>
-{
-    try
-    {
-        Console.WriteLine($"🎯 Batch calculating compatibility for user {request.CurrentUserId} with {request.UserIds.Count} users...");
-
-        var currentUser = await db.Users
-            .Include(u => u.MusicProfile)
-            .AsNoTracking()
-            .FirstOrDefaultAsync(u => u.Id == request.CurrentUserId);
-
-        if (currentUser?.MusicProfile == null)
-        {
-            return Results.BadRequest(new { success = false, message = "Current user not found or has no music profile" });
-        }
-
-        // Fetch all target users in ONE query
-        var targetUsers = await db.Users
-            .Include(u => u.MusicProfile)
-            .Include(u => u.Images)
-            .Where(u => request.UserIds.Contains(u.Id) && u.MusicProfile != null)
-            .AsNoTracking()
-            .ToListAsync();
-
-        if (!targetUsers.Any())
-        {
-            return Results.Ok(new { success = true, results = new List<CompatibilityResult>() });
-        }
-
-        // OPTION 1: Use local Jaccard calculation (INSTANT - no API calls)
-        var localResults = targetUsers.Select(user => new CompatibilityResult
-        {
-            UserId = user.Id,
-            Name = user.Name,
-            Age = user.Age,
-            Location = user.Location,
-            Bio = user.Bio,
-            CompatibilityScore = CalculateLocalCompatibility(currentUser.MusicProfile, user.MusicProfile!),
-            MusicProfile = new MusicProfileDto
-            {
-                FavoriteGenres = user.MusicProfile!.FavoriteGenres,
-                FavoriteArtists = user.MusicProfile.FavoriteArtists,
-                FavoriteSongs = user.MusicProfile.FavoriteSongs
-            },
-            Images = user.Images.Select(i => i.ImageUrl ?? i.Url).ToList()
-        }).OrderByDescending(r => r.CompatibilityScore).ToList();
-
-        // OPTION 2: Batch Gemini calls in parallel (if you want AI scores)
-        // Uncomment this if you want to use Gemini instead:
-        /*
-        var geminiTasks = targetUsers.Select(async user =>
-        {
-            var score = await GeminiService.CalculatePercentage(currentUser.MusicProfile, user.MusicProfile!);
-            return new CompatibilityResult
-            {
-                UserId = user.Id,
-                Name = user.Name,
-                Age = user.Age,
-                Location = user.Location,
-                Bio = user.Bio,
-                CompatibilityScore = score ?? CalculateLocalCompatibility(currentUser.MusicProfile, user.MusicProfile!),
-                MusicProfile = new MusicProfileDto
-                {
-                    FavoriteGenres = user.MusicProfile!.FavoriteGenres,
-                    FavoriteArtists = user.MusicProfile.FavoriteArtists,
-                    FavoriteSongs = user.MusicProfile.FavoriteSongs
-                },
-                Images = user.Images.Select(i => i.ImageUrl ?? i.Url).ToList()
-            };
-        }).ToList();
-
-        var geminiResults = await Task.WhenAll(geminiTasks);
-        var results = geminiResults.OrderByDescending(r => r.CompatibilityScore).ToList();
-        */
-
-        // Batch insert to queue (ONE database operation)
-        var queueItems = localResults.Select((result, index) => new UserSuggestionQueue
-        {
-            UserId = request.CurrentUserId,
-            SuggestedUserId = result.UserId,
-            QueuePosition = index,
-            CompatibilityScore = result.CompatibilityScore,
-            CreatedAt = DateTime.UtcNow
-        }).ToList();
-
-        try
-        {
-            db.UserSuggestionQueues.AddRange(queueItems);
-            await db.SaveChangesAsync();
-            Console.WriteLine($"✅ Batch inserted {queueItems.Count} compatibility scores");
-        }
-        catch (DbUpdateException ex)
-        {
-            Console.WriteLine($"⚠️ Some users already in queue: {ex.InnerException?.Message}");
-        }
-
-        return Results.Ok(new
-        {
-            success = true,
-            processedCount = localResults.Count,
-            results = localResults
-        });
-    }
-    catch (Exception ex)
-    {
-        Console.WriteLine($"❌ Batch calculation error: {ex.Message}");
-        return Results.Problem(detail: ex.Message, statusCode: 500);
-    }
-})
-.WithName("BatchCalculateCompatibility")
-.WithSummary("Calculate compatibility scores for multiple users at once");
 app.MapGet("/users", async (AppDbContext db, HttpRequest request) =>
 {
     try
@@ -428,7 +315,6 @@ app.MapGet("/users", async (AppDbContext db, HttpRequest request) =>
 .WithDescription("Returns users sorted by compatibility score. Supports ?userId={id}&count={1-50}");
 
 // ===== HELPER FUNCTIONS =====
-
 static UserDto ToUserDto(User user) => new()
 {
     Id = user.Id,
