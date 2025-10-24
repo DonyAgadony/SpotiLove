@@ -5,22 +5,6 @@ using System.ComponentModel.DataAnnotations.Schema;
 using System.Text.Json.Serialization;
 
 namespace Spotilove;
-
-// Note: Assuming the User, MusicProfile, Like, UserImage, and UserSuggestionQueue
-// models are defined in a separate file (e.g., SpotiloveModels.cs) and contain 
-// the necessary ICollection properties for the relationships defined here.
-
-// Required properties on the User model for the DbContext to compile correctly:
-/*
-public class User
-{
-    // ... other properties
-    public List<Like> LikesSent { get; set; } = new(); // Used by Like.FromUser relationship
-    public List<Like> LikesReceived { get; set; } = new(); // Used by Like.ToUser relationship
-    public List<UserSuggestionQueue> Suggestions { get; set; } = new(); // Used by USQ.User relationship
-}
-*/
-
 // =======================================================
 // ===== DATABASE CONTEXT =====
 // =======================================================
@@ -111,6 +95,72 @@ public class AppDbContext : DbContext
 // ===== PASSWORD UTILS =====
 public static class PasswordHasher
 {
+    public static async Task<IResult> SendLike(AppDbContext db, SendLikeDto dto)
+    {
+        // 1. Basic validation
+        if (dto.FromUserId == dto.ToUserId)
+        {
+            return Results.BadRequest(new ResponseMessage { Success = false, Message = "Cannot like yourself." });
+        }
+
+        // Check if a like already exists from FromUser to ToUser (prevent duplicate swipes)
+        if (await db.Likes.AnyAsync(l => l.FromUserId == dto.FromUserId && l.ToUserId == dto.ToUserId))
+        {
+            return Results.Conflict(new ResponseMessage { Success = false, Message = $"User {dto.FromUserId} already swiped on user {dto.ToUserId}." });
+        }
+
+        // 2. Check for an existing reverse like (potential match)
+        var reverseLike = await db.Likes
+            .FirstOrDefaultAsync(l =>
+                l.FromUserId == dto.ToUserId &&
+                l.ToUserId == dto.FromUserId);
+
+        bool isMatch = false;
+
+        // 3. Create the new outgoing like
+        var newLike = new Like
+        {
+            FromUserId = dto.FromUserId,
+            ToUserId = dto.ToUserId,
+            IsMatch = false, // Default to false
+            CreatedAt = DateTime.UtcNow
+        };
+
+        if (reverseLike != null)
+        {
+            // MUTUAL MATCH!
+            isMatch = true;
+
+            // Update the existing reverse like to reflect the match
+            reverseLike.IsMatch = true;
+            db.Likes.Update(reverseLike);
+
+            // Set the new outgoing like to reflect the match
+            newLike.IsMatch = true;
+        }
+
+        db.Likes.Add(newLike);
+        await db.SaveChangesAsync();
+
+        if (isMatch)
+        {
+            // Return a success message indicating a match
+            return Results.Ok(new ResponseMessage
+            {
+                Success = true,
+                Message = $"MATCH! You and user {dto.ToUserId} liked each other."
+            });
+        }
+        else
+        {
+            // Return a success message indicating a successful swipe
+            return Results.Created($"/likes/{dto.FromUserId}/{dto.ToUserId}", new ResponseMessage
+            {
+                Success = true,
+                Message = $"Successfully liked user {dto.ToUserId}. Waiting for them to like back."
+            });
+        }
+    }
     private static UserDto ToUserDto(User user) => new()
     {
         Id = user.Id,

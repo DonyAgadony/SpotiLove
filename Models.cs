@@ -180,6 +180,7 @@ public class UserSuggestionQueue
 // =======================================================
 // ===== DTOs (Data Transfer Objects) and Requests =======
 // =======================================================
+public record SendLikeDto(int FromUserId, int ToUserId);
 
 public class MusicProfileDto
 {
