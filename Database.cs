@@ -3,83 +3,10 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Spotilove;
 
-public class AppDbContext : DbContext
-{
-    public DbSet<User> Users => Set<User>();
-    public DbSet<MusicProfile> MusicProfiles => Set<MusicProfile>();
-    public DbSet<Like> Likes => Set<Like>();
-    public DbSet<UserImage> UserImages { get; set; }
-    public DbSet<UserSuggestionQueue> UserSuggestionQueues { get; set; }
+// =======================================================
+// ===== ENTITIES (MODELS) =====
+// =======================================================
 
-    public AppDbContext(DbContextOptions<AppDbContext> options) : base(options) { }
-
-    protected override void OnModelCreating(ModelBuilder modelBuilder)
-    {
-        // ===== User ↔ MusicProfile (1-1) =====
-        modelBuilder.Entity<User>()
-            .HasOne(u => u.MusicProfile)
-            .WithOne(m => m.User)
-            .HasForeignKey<MusicProfile>(m => m.UserId)
-            .OnDelete(DeleteBehavior.Cascade);
-
-        // ===== User ↔ UserImage (1-many) =====
-        modelBuilder.Entity<UserImage>()
-            .HasOne(ui => ui.User)
-            .WithMany(u => u.Images)
-            .HasForeignKey(ui => ui.UserId)
-            .OnDelete(DeleteBehavior.Cascade);
-
-        // ===== Like Relationships =====
-        modelBuilder.Entity<Like>()
-            .HasOne(l => l.FromUser)
-            .WithMany(u => u.Likes)
-            .HasForeignKey(l => l.FromUserId)
-            .OnDelete(DeleteBehavior.Restrict);
-
-        modelBuilder.Entity<Like>()
-            .HasOne(l => l.ToUser)
-            .WithMany()
-            .HasForeignKey(l => l.ToUserId)
-            .OnDelete(DeleteBehavior.Restrict);
-
-        // OPTIMIZATION: Composite unique index (prevents duplicates + faster queries)
-        modelBuilder.Entity<Like>()
-            .HasIndex(l => new { l.FromUserId, l.ToUserId })
-            .IsUnique();
-
-        // ===== UserSuggestionQueue Configuration =====
-        modelBuilder.Entity<UserSuggestionQueue>(entity =>
-        {
-            entity.HasKey(e => e.Id);
-
-            entity.HasOne(e => e.User)
-                  .WithMany()
-                  .HasForeignKey(e => e.UserId)
-                  .OnDelete(DeleteBehavior.Cascade);
-
-            entity.HasOne(e => e.SuggestedUser)
-                  .WithMany()
-                  .HasForeignKey(e => e.SuggestedUserId)
-                  .OnDelete(DeleteBehavior.Restrict);
-
-            // OPTIMIZATION: Composite index for queue position lookups
-            entity.HasIndex(e => new { e.UserId, e.QueuePosition });
-
-            // OPTIMIZATION: Unique constraint to prevent duplicate suggestions
-            entity.HasIndex(e => new { e.UserId, e.SuggestedUserId })
-                  .IsUnique();
-
-            // OPTIMIZATION: Index for score-based queries
-            entity.HasIndex(e => new { e.UserId, e.CompatibilityScore });
-        });
-
-        // OPTIMIZATION: Index on Email for auth lookups
-        modelBuilder.Entity<User>()
-            .HasIndex(u => u.Email);
-    }
-}
-
-// ===== ENTITIES =====
 public class User
 {
     public int Id { get; set; }
@@ -100,7 +27,7 @@ public class User
     // Navigation
     public MusicProfile? MusicProfile { get; set; }
     public List<UserImage> Images { get; set; } = new();
-    public List<Like> Likes { get; set; } = new();
+    public List<Like> Likes { get; set; } = new(); // Likes initiated by this user (FromUser)
 }
 
 public class MusicProfile
@@ -128,11 +55,11 @@ public class Like
     public int Id { get; set; }
     public int FromUserId { get; set; }
     public int ToUserId { get; set; }
-    public bool IsLike { get; set; }
+    public bool IsLike { get; set; } // true for like, false for dislike/swipe left
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 
     public User? FromUser { get; set; }
-    public User? ToUser { get; set; }
+    public User? ToUser { get; set; } // Note: The Many() side here is implicit, used for lookups
 }
 
 public class UserSuggestionQueue
@@ -148,10 +75,92 @@ public class UserSuggestionQueue
     public User SuggestedUser { get; set; } = null!;
 }
 
+
+// =======================================================
+// ===== DATABASE CONTEXT =====
+// =======================================================
+public class AppDbContext : DbContext
+{
+    public DbSet<User> Users => Set<User>();
+    public DbSet<MusicProfile> MusicProfiles => Set<MusicProfile>();
+    public DbSet<Like> Likes => Set<Like>();
+    public DbSet<UserImage> UserImages { get; set; } = null!;
+    public DbSet<UserSuggestionQueue> UserSuggestionQueues { get; set; } = null!;
+
+    public AppDbContext(DbContextOptions<AppDbContext> options) : base(options) { }
+
+    protected override void OnModelCreating(ModelBuilder modelBuilder)
+    {
+        // ===== User ↔ MusicProfile (1-1) =====
+        modelBuilder.Entity<User>()
+            .HasOne(u => u.MusicProfile)
+            .WithOne(m => m.User)
+            .HasForeignKey<MusicProfile>(m => m.UserId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        // ===== User ↔ UserImage (1-many) =====
+        modelBuilder.Entity<UserImage>()
+            .HasOne(ui => ui.User)
+            .WithMany(u => u.Images)
+            .HasForeignKey(ui => ui.UserId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        // ===== Like Relationships =====
+        // FromUser is the user initiating the like
+        modelBuilder.Entity<Like>()
+            .HasOne(l => l.FromUser)
+            .WithMany(u => u.Likes)
+            .HasForeignKey(l => l.FromUserId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        // ToUser is the user being liked
+        modelBuilder.Entity<Like>()
+            .HasOne(l => l.ToUser)
+            .WithMany() // No navigation property on User for "received likes", but we define the relationship
+            .HasForeignKey(l => l.ToUserId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        // OPTIMIZATION: Composite unique index (prevents duplicates + faster queries)
+        modelBuilder.Entity<Like>()
+            .HasIndex(l => new { l.FromUserId, l.ToUserId })
+            .IsUnique();
+
+        // ===== UserSuggestionQueue Configuration =====
+        modelBuilder.Entity<UserSuggestionQueue>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+
+            entity.HasOne(e => e.User) // The user whose queue this is
+                    .WithMany()
+                    .HasForeignKey(e => e.UserId)
+                    .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(e => e.SuggestedUser) // The user being suggested
+                    .WithMany()
+                    .HasForeignKey(e => e.SuggestedUserId)
+                    .OnDelete(DeleteBehavior.Restrict);
+
+            // OPTIMIZATION: Composite index for queue position lookups
+            entity.HasIndex(e => new { e.UserId, e.QueuePosition });
+
+            // OPTIMIZATION: Unique constraint to prevent duplicate suggestions
+            entity.HasIndex(e => new { e.UserId, e.SuggestedUserId })
+                    .IsUnique();
+
+            // OPTIMIZATION: Index for score-based queries
+            entity.HasIndex(e => new { e.UserId, e.CompatibilityScore });
+        });
+
+        // OPTIMIZATION: Index on Email for auth lookups
+        modelBuilder.Entity<User>()
+            .HasIndex(u => u.Email);
+    }
+}
+
 // ===== PASSWORD UTILS =====
 public static class PasswordHasher
 {
-    public static string HashPassword(string password)
+        public static string HashPassword(string password)
     {
         using var sha256 = System.Security.Cryptography.SHA256.Create();
         var bytes = Encoding.UTF8.GetBytes(password + "SpotiLove_Salt");
@@ -159,13 +168,16 @@ public static class PasswordHasher
         return Convert.ToBase64String(hash);
     }
 
+    /// <summary>
+    /// Verifies a plain text password against a stored hash.
+    /// </summary>
     public static bool VerifyPassword(string password, string hash)
     {
         return HashPassword(password) == hash;
     }
 }
 
-// ===== DTOs =====
+// ===== DTOs (Data Transfer Objects) =====
 public class MusicProfileDto
 {
     public string? FavoriteSongs { get; set; }
@@ -229,9 +241,24 @@ public class CompatibilityResult
     public List<string> Images { get; set; } = new();
 }
 
-// ===== ENDPOINTS =====
+// ===== REQUEST/RECORDS (Simplified DTOs for Endpoints) =====
+public record CreateUserDto(string Name, int Age, string Gender, string Genres, string Artists, string Songs = "");
+public record UpdateProfileDto(string Genres, string Artists, string Songs = "");
+public record LikeDto(int FromUserId, int ToUserId, bool IsLike);
+
+public class ResponseMessage
+{
+    public bool Success { get; set; }
+}
+
+// =======================================================
+// ===== ENDPOINT HANDLERS (for Minimal API) =====
+// =======================================================
 public static class Endpoints
 {
+    /// <summary>
+    /// Creates a new user with an initial music profile.
+    /// </summary>
     public static async Task<IResult> CreateUser(AppDbContext db, CreateUserDto dto)
     {
         var user = new User
@@ -239,6 +266,7 @@ public static class Endpoints
             Name = dto.Name,
             Age = dto.Age,
             Gender = dto.Gender,
+            // Note: Email/Password fields are missing here, this is a simplified user creation.
             MusicProfile = new MusicProfile
             {
                 FavoriteGenres = dto.Genres,
@@ -248,9 +276,23 @@ public static class Endpoints
         };
         db.Users.Add(user);
         await db.SaveChangesAsync();
-        return Results.Ok(user);
+        return Results.Ok(new UserDto
+        {
+            Id = user.Id,
+            Name = user.Name,
+            Age = user.Age,
+            MusicProfile = user.MusicProfile != null ? new MusicProfileDto
+            {
+                FavoriteArtists = user.MusicProfile.FavoriteArtists,
+                FavoriteGenres = user.MusicProfile.FavoriteGenres,
+                FavoriteSongs = user.MusicProfile.FavoriteSongs,
+            } : null
+        });
     }
 
+    /// <summary>
+    /// Gets a user profile by ID.
+    /// </summary>
     public static async Task<IResult> GetUser(AppDbContext db, int id)
     {
         var user = await db.Users
@@ -260,9 +302,12 @@ public static class Endpoints
             .FirstOrDefaultAsync(u => u.Id == id);
 
         if (user == null) return Results.NotFound("User not found");
-        return Results.Ok(user);
+        return Results.Ok(user); // Returning the full entity for simplicity
     }
 
+    /// <summary>
+    /// Updates only the music profile fields.
+    /// </summary>
     public static async Task<IResult> UpdateProfile(AppDbContext db, int id, UpdateProfileDto dto)
     {
         var user = await db.Users
@@ -280,6 +325,9 @@ public static class Endpoints
         return Results.Ok(user);
     }
 
+    /// <summary>
+    /// Returns a list of all users.
+    /// </summary>
     public static async Task<IResult> SearchUsers(AppDbContext db)
     {
         var users = await db.Users
@@ -291,18 +339,30 @@ public static class Endpoints
         return Results.Ok(users);
     }
 
+    /// <summary>
+    /// Adds a new image URL to a user's profile.
+    /// </summary>
     public static async Task<IResult> AddUserImage(AppDbContext db, int id, UserImage image)
     {
         var user = await db.Users.FirstOrDefaultAsync(u => u.Id == id);
         if (user == null) return Results.NotFound("User not found");
 
         image.UserId = id;
+        // Using the ImageUrl property from the input DTO/Entity provided by the user
+        if (string.IsNullOrEmpty(image.Url) && !string.IsNullOrEmpty(image.ImageUrl))
+        {
+            image.Url = image.ImageUrl;
+        }
+
         db.UserImages.Add(image);
         await db.SaveChangesAsync();
 
         return Results.Ok(image);
     }
 
+    /// <summary>
+    /// Gets all images for a specific user.
+    /// </summary>
     public static async Task<IResult> GetUserImages(AppDbContext db, int id)
     {
         var user = await db.Users
@@ -312,16 +372,6 @@ public static class Endpoints
 
         if (user == null) return Results.NotFound("User not found");
 
-        return Results.Ok(user.Images);
+        return Results.Ok(user.Images.Select(i => i.Url).ToList());
     }
-}
-
-// ===== REQUEST/RECORDS =====
-public record CreateUserDto(string Name, int Age, string Gender, string Genres, string Artists, string Songs = "");
-public record UpdateProfileDto(string Genres, string Artists, string Songs = "");
-public record LikeDto(int FromUserId, int ToUserId, bool IsLike);
-
-public class ResponseMessage
-{
-    public bool Success { get; set; }
 }
