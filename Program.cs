@@ -455,6 +455,528 @@ app.MapPost("/seed-database", async (AppDbContext db) =>
     }
 });
 
+// Spotify Login (for existing users)
+app.MapGet("/auth/spotify/login", (SpotifyService spotify) =>
+{
+    var loginUrl = spotify.GetLoginUrl();
+    return Results.Redirect(loginUrl);
+})
+.WithName("SpotifyLogin")
+.WithSummary("Redirects to Spotify OAuth for login");
+
+// Spotify Sign Up (for new users)
+app.MapGet("/auth/spotify/signup", (SpotifyService spotify) =>
+{
+    var signupUrl = spotify.GetLoginUrl(); // Same OAuth flow, different handling in callback
+    return Results.Redirect(signupUrl);
+})
+.WithName("SpotifySignUp")
+.WithSummary("Redirects to Spotify OAuth for signup");
+
+// Spotify OAuth Callback - handles both login and signup
+app.MapGet("/callback", async (
+    HttpRequest req,
+    SpotifyService spotify,
+    AppDbContext db,
+    IPasswordHasher<User> hasher) =>
+{
+    try
+    {
+        var code = req.Query["code"].ToString();
+        if (string.IsNullOrEmpty(code))
+            return Results.BadRequest(new { success = false, message = "Missing authorization code" });
+
+        // Connect to Spotify and get access token
+        await spotify.ConnectUserAsync(code);
+
+        // Fetch Spotify profile
+        var spotifyProfile = await spotify.GetUserProfileAsync();
+
+        if (spotifyProfile == null || string.IsNullOrEmpty(spotifyProfile.Email))
+        {
+            return Results.BadRequest(new
+            {
+                success = false,
+                message = "Unable to fetch Spotify profile. Please ensure email access is granted."
+            });
+        }
+
+        // Check if user exists
+        var existingUser = await db.Users
+            .Include(u => u.MusicProfile)
+            .FirstOrDefaultAsync(u => u.Email == spotifyProfile.Email);
+
+        User user;
+        bool isNewUser = false;
+
+        if (existingUser == null)
+        {
+            // CREATE NEW USER (Sign Up flow)
+            isNewUser = true;
+
+            // Generate a random secure password (user won't need it since they'll use Spotify)
+            var randomPassword = Guid.NewGuid().ToString();
+            var hashedPassword = hasher.HashPassword(null!, randomPassword);
+
+            user = new User
+            {
+                Name = spotifyProfile.DisplayName ?? spotifyProfile.Id,
+                Email = spotifyProfile.Email,
+                PasswordHash = hashedPassword,
+                Age = 18, // Default age, can be updated later
+                Gender = "Prefer not to say", // Default, can be updated later
+                CreatedAt = DateTime.UtcNow,
+                MusicProfile = new MusicProfile
+                {
+                    FavoriteGenres = "",
+                    FavoriteArtists = "",
+                    FavoriteSongs = ""
+                }
+            };
+
+            db.Users.Add(user);
+            await db.SaveChangesAsync();
+
+            Console.WriteLine($"✅ New user created via Spotify: {user.Email} (ID: {user.Id})");
+        }
+        else
+        {
+            // EXISTING USER (Login flow)
+            user = existingUser;
+            user.LastLoginAt = DateTime.UtcNow;
+
+            Console.WriteLine($"✅ Existing user logged in via Spotify: {user.Email} (ID: {user.Id})");
+        }
+
+        // Fetch and update music profile from Spotify
+        try
+        {
+            var topSongs = await spotify.GetUserTopSongsAsync(10);
+            var topArtists = await spotify.GetUserTopArtistsAsync(10);
+            var topGenres = await spotify.GetUserTopGenresAsync(20);
+
+            if (user.MusicProfile == null)
+            {
+                user.MusicProfile = new MusicProfile
+                {
+                    UserId = user.Id,
+                    FavoriteGenres = string.Join(", ", topGenres),
+                    FavoriteArtists = string.Join(", ", topArtists),
+                    FavoriteSongs = string.Join(", ", topSongs)
+                };
+            }
+            else
+            {
+                user.MusicProfile.FavoriteGenres = string.Join(", ", topGenres);
+                user.MusicProfile.FavoriteArtists = string.Join(", ", topArtists);
+                user.MusicProfile.FavoriteSongs = string.Join(", ", topSongs);
+            }
+
+            await db.SaveChangesAsync();
+
+            Console.WriteLine($"🎵 Music profile updated for user {user.Id}:");
+            Console.WriteLine($"   Genres: {topGenres.Count}");
+            Console.WriteLine($"   Artists: {topArtists.Count}");
+            Console.WriteLine($"   Songs: {topSongs.Count}");
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"⚠️ Failed to fetch Spotify music data: {ex.Message}");
+            // Continue anyway - user is created/logged in
+        }
+
+        // Generate auth token
+        var token = Guid.NewGuid().ToString();
+
+        // Return success response with user data
+        var response = new
+        {
+            success = true,
+            message = isNewUser
+                ? "Account created successfully with Spotify!"
+                : "Logged in successfully with Spotify!",
+            token,
+            isNewUser,
+            user = new
+            {
+                user.Id,
+                user.Name,
+                user.Email,
+                user.Age,
+                user.Gender,
+                musicProfile = user.MusicProfile != null ? new
+                {
+                    user.MusicProfile.FavoriteGenres,
+                    user.MusicProfile.FavoriteArtists,
+                    user.MusicProfile.FavoriteSongs
+                } : null
+            }
+        };
+
+        // Redirect to a success page or deep link back to the app
+        var redirectUrl = $"spotilove://auth/success?token={token}&userId={user.Id}&isNewUser={isNewUser}";
+
+        // For web testing, return JSON
+        return Results.Ok(response);
+    }
+    catch (Exception ex)
+    {
+        Console.WriteLine($"❌ Spotify callback error: {ex.Message}\n{ex.StackTrace}");
+        return Results.Problem(
+            detail: ex.Message,
+            title: "Spotify authentication failed",
+            statusCode: 500
+        );
+    }
+})
+.WithName("SpotifyCallback")
+.WithSummary("Handles Spotify OAuth callback for both login and signup");
+
+// Optional: Endpoint to manually sync Spotify music profile for existing users
+app.MapPost("/auth/spotify/sync-profile/{userId:int}", async (
+    int userId,
+    SpotifyService spotify,
+    AppDbContext db) =>
+{
+    try
+    {
+        var user = await db.Users
+            .Include(u => u.MusicProfile)
+            .FirstOrDefaultAsync(u => u.Id == userId);
+
+        if (user == null)
+            return Results.NotFound(new { success = false, message = "User not found" });
+
+        // Fetch latest music data from Spotify
+        var topSongs = await spotify.GetUserTopSongsAsync(10);
+        var topArtists = await spotify.GetUserTopArtistsAsync(10);
+        var topGenres = await spotify.GetUserTopGenresAsync(20);
+
+        if (user.MusicProfile == null)
+        {
+            user.MusicProfile = new MusicProfile
+            {
+                UserId = userId,
+                FavoriteGenres = string.Join(", ", topGenres),
+                FavoriteArtists = string.Join(", ", topArtists),
+                FavoriteSongs = string.Join(", ", topSongs)
+            };
+        }
+        else
+        {
+            user.MusicProfile.FavoriteGenres = string.Join(", ", topGenres);
+            user.MusicProfile.FavoriteArtists = string.Join(", ", topArtists);
+            user.MusicProfile.FavoriteSongs = string.Join(", ", topSongs);
+        }
+
+        await db.SaveChangesAsync();
+
+        return Results.Ok(new
+        {
+            success = true,
+            message = "Music profile synced successfully",
+            musicProfile = new
+            {
+                user.MusicProfile.FavoriteGenres,
+                user.MusicProfile.FavoriteArtists,
+                user.MusicProfile.FavoriteSongs
+            }
+        });
+    }
+    catch (Exception ex)
+    {
+        return Results.Problem(
+            detail: ex.Message,
+            title: "Failed to sync music profile",
+            statusCode: 500
+        );
+    }
+})
+.WithName("SyncSpotifyProfile")
+.WithSummary("Manually sync Spotify music profile for an existing user");
+// ---- Spotify Authentication Endpoints ----
+
+// Spotify Login/Signup (unified endpoint)
+app.MapGet("/login", (SpotifyService spotify) =>
+{
+    var loginUrl = spotify.GetLoginUrl();
+    return Results.Redirect(loginUrl);
+})
+.WithName("SpotifyAuth")
+.WithSummary("Redirects to Spotify OAuth (handles both login and signup)");
+
+// SINGLE Spotify OAuth Callback - handles both login and signup
+app.MapGet("/callback", async (
+    HttpRequest req,
+    SpotifyService spotify,
+    AppDbContext db,
+    IPasswordHasher<User> hasher) =>
+{
+    try
+    {
+        var code = req.Query["code"].ToString();
+        var error = req.Query["error"].ToString();
+
+        // Handle user declining authorization
+        if (!string.IsNullOrEmpty(error))
+        {
+            var errorRedirect = "spotilove://auth/error?message=Authorization declined";
+            return Results.Redirect(errorRedirect);
+        }
+
+        if (string.IsNullOrEmpty(code))
+        {
+            var errorRedirect = "spotilove://auth/error?message=Missing authorization code";
+            return Results.Redirect(errorRedirect);
+        }
+
+        Console.WriteLine($"🔐 Spotify callback received with code");
+
+        // Connect to Spotify and get access token
+        await spotify.ConnectUserAsync(code);
+        Console.WriteLine("✅ Connected to Spotify API");
+
+        // Fetch Spotify profile
+        var spotifyProfile = await spotify.GetUserProfileAsync();
+
+        if (spotifyProfile == null || string.IsNullOrEmpty(spotifyProfile.Email))
+        {
+            var errorRedirect = "spotilove://auth/error?message=Unable to fetch email from Spotify";
+            return Results.Redirect(errorRedirect);
+        }
+
+        Console.WriteLine($"📧 Spotify email: {spotifyProfile.Email}");
+
+        // Check if user exists
+        var existingUser = await db.Users
+            .Include(u => u.MusicProfile)
+            .FirstOrDefaultAsync(u => u.Email == spotifyProfile.Email);
+
+        User user;
+        bool isNewUser = false;
+
+        if (existingUser == null)
+        {
+            // CREATE NEW USER (Sign Up flow)
+            isNewUser = true;
+
+            var randomPassword = Guid.NewGuid().ToString();
+            var hashedPassword = hasher.HashPassword(null!, randomPassword);
+
+            user = new User
+            {
+                Name = spotifyProfile.DisplayName ?? spotifyProfile.Id,
+                Email = spotifyProfile.Email,
+                PasswordHash = hashedPassword,
+                Age = 18,
+                Gender = "Prefer not to say",
+                CreatedAt = DateTime.UtcNow,
+                MusicProfile = new MusicProfile
+                {
+                    FavoriteGenres = "",
+                    FavoriteArtists = "",
+                    FavoriteSongs = ""
+                }
+            };
+
+            db.Users.Add(user);
+            await db.SaveChangesAsync();
+
+            Console.WriteLine($"✅ New user created: {user.Email} (ID: {user.Id})");
+        }
+        else
+        {
+            // EXISTING USER (Login flow)
+            user = existingUser;
+            user.LastLoginAt = DateTime.UtcNow;
+            await db.SaveChangesAsync();
+
+            Console.WriteLine($"✅ Existing user logged in: {user.Email} (ID: {user.Id})");
+        }
+
+        // Fetch and update music profile from Spotify (async, don't block redirect)
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                var topSongs = await spotify.GetUserTopSongsAsync(10);
+                var topArtists = await spotify.GetUserTopArtistsAsync(10);
+                var topGenres = await spotify.GetUserTopGenresAsync(20);
+
+                // Create a new DB context for this background task
+                var optionsBuilder = new DbContextOptionsBuilder<AppDbContext>();
+                var connectionString = db.Database.GetConnectionString();
+                optionsBuilder.UseSqlite(connectionString);
+
+                using var bgDb = new AppDbContext(optionsBuilder.Options);
+
+                var bgUser = await bgDb.Users
+                    .Include(u => u.MusicProfile)
+                    .FirstOrDefaultAsync(u => u.Id == user.Id);
+
+                if (bgUser != null)
+                {
+                    if (bgUser.MusicProfile == null)
+                    {
+                        bgUser.MusicProfile = new MusicProfile
+                        {
+                            UserId = bgUser.Id,
+                            FavoriteGenres = string.Join(", ", topGenres),
+                            FavoriteArtists = string.Join(", ", topArtists),
+                            FavoriteSongs = string.Join(", ", topSongs)
+                        };
+                    }
+                    else
+                    {
+                        bgUser.MusicProfile.FavoriteGenres = string.Join(", ", topGenres);
+                        bgUser.MusicProfile.FavoriteArtists = string.Join(", ", topArtists);
+                        bgUser.MusicProfile.FavoriteSongs = string.Join(", ", topSongs);
+                    }
+
+                    await bgDb.SaveChangesAsync();
+
+                    Console.WriteLine($"🎵 Music profile updated for user {bgUser.Id}:");
+                    Console.WriteLine($"   Genres: {string.Join(", ", topGenres.Take(3))}...");
+                    Console.WriteLine($"   Artists: {string.Join(", ", topArtists.Take(3))}...");
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"⚠️ Background music sync failed: {ex.Message}");
+            }
+        });
+
+        // Generate auth token
+        var token = Guid.NewGuid().ToString();
+
+        // Build deep link URL to redirect back to the app
+        var deepLinkUrl = $"spotilove://auth/success?token={Uri.EscapeDataString(token)}&userId={user.Id}&isNewUser={isNewUser}&name={Uri.EscapeDataString(user.Name ?? "User")}";
+
+        Console.WriteLine($"🔗 Redirecting to: {deepLinkUrl}");
+
+        // Return an HTML page that auto-redirects
+        var html = $@"
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset='UTF-8'>
+    <meta name='viewport' content='width=device-width, initial-scale=1.0'>
+    <title>SpotiLove - Success</title>
+    <style>
+        body {{
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif;
+            background: linear-gradient(135deg, #1db954 0%, #191414 100%);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            margin: 0;
+            color: white;
+        }}
+        .container {{
+            text-align: center;
+            padding: 40px;
+            background: rgba(0,0,0,0.5);
+            border-radius: 20px;
+            max-width: 400px;
+        }}
+        .spinner {{
+            border: 4px solid rgba(255,255,255,0.3);
+            border-top: 4px solid #1db954;
+            border-radius: 50%;
+            width: 50px;
+            height: 50px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 20px;
+        }}
+        @keyframes spin {{
+            0% {{ transform: rotate(0deg); }}
+            100% {{ transform: rotate(360deg); }}
+        }}
+        h1 {{ margin: 0 0 10px; font-size: 28px; }}
+        p {{ margin: 10px 0; opacity: 0.9; }}
+        .manual-link {{
+            margin-top: 20px;
+            padding: 15px 30px;
+            background: #1db954;
+            color: white;
+            text-decoration: none;
+            border-radius: 25px;
+            display: inline-block;
+            font-weight: bold;
+        }}
+    </style>
+</head>
+<body>
+    <div class='container'>
+        <div class='spinner'></div>
+        <h1>✨ {(isNewUser ? "Welcome to SpotiLove!" : "Welcome Back!")}</h1>
+        <p>Redirecting you back to the app...</p>
+        <p style='font-size: 14px; opacity: 0.7;'>If you're not redirected automatically, click below:</p>
+        <a href='{deepLinkUrl}' class='manual-link'>Open SpotiLove</a>
+    </div>
+    <script>
+        setTimeout(() => {{
+            window.location.href = '{deepLinkUrl}';
+        }}, 1500);
+        
+        setTimeout(() => {{
+            window.close();
+        }}, 3000);
+    </script>
+</body>
+</html>";
+
+        return Results.Content(html, "text/html");
+    }
+    catch (Exception ex)
+    {
+        Console.WriteLine($"❌ Spotify callback error: {ex.Message}\n{ex.StackTrace}");
+
+        var errorDeepLink = $"spotilove://auth/error?message={Uri.EscapeDataString(ex.Message)}";
+
+        var errorHtml = $@"
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset='UTF-8'>
+    <title>SpotiLove - Error</title>
+    <style>
+        body {{
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif;
+            background: #191414;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            margin: 0;
+            color: white;
+        }}
+        .container {{
+            text-align: center;
+            padding: 40px;
+            background: rgba(255,0,0,0.1);
+            border-radius: 20px;
+            max-width: 400px;
+        }}
+        h1 {{ color: #ff4444; }}
+        a {{ color: #1db954; text-decoration: none; font-weight: bold; }}
+    </style>
+</head>
+<body>
+    <div class='container'>
+        <h1>❌ Authentication Failed</h1>
+        <p>{ex.Message}</p>
+        <p><a href='{errorDeepLink}'>Return to App</a></p>
+    </div>
+</body>
+</html>";
+
+        return Results.Content(errorHtml, "text/html");
+    }
+})
+.WithName("SpotifyCallback")
+.WithSummary("Handles Spotify OAuth callback for both login and signup");
 //Take 10 Example Users from DB
 // ---- NEW: Take 10 Example Users Endpoint ----
 // ---- NEW: Take Random Users & Compare Music Taste ----
