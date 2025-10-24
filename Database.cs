@@ -2,80 +2,6 @@ using System.Text;
 using Microsoft.EntityFrameworkCore;
 
 namespace Spotilove;
-
-// =======================================================
-// ===== ENTITIES (MODELS) =====
-// =======================================================
-
-public class User
-{
-    public int Id { get; set; }
-    public string Name { get; set; } = string.Empty;
-    public int Age { get; set; }
-    public string Gender { get; set; } = string.Empty;
-
-    // Authentication
-    public string? Email { get; set; }
-    public string? PasswordHash { get; set; }
-    public DateTime? LastLoginAt { get; set; }
-    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
-
-    // Profile
-    public string? Bio { get; set; }
-    public string? Location { get; set; }
-
-    // Navigation
-    public MusicProfile? MusicProfile { get; set; }
-    public List<UserImage> Images { get; set; } = new();
-    public List<Like> Likes { get; set; } = new(); // Likes initiated by this user (FromUser)
-}
-
-public class MusicProfile
-{
-    public int Id { get; set; }
-    public int UserId { get; set; }
-    public string FavoriteGenres { get; set; } = "";
-    public string FavoriteArtists { get; set; } = "";
-    public string FavoriteSongs { get; set; } = "";
-
-    public User? User { get; set; }
-}
-
-public class UserImage
-{
-    public int Id { get; set; }
-    public string Url { get; set; } = string.Empty;
-    public int UserId { get; set; }
-    public User? User { get; set; }
-    public string? ImageUrl { get; set; }
-}
-
-public class Like
-{
-    public int Id { get; set; }
-    public int FromUserId { get; set; }
-    public int ToUserId { get; set; }
-    public bool IsLike { get; set; } // true for like, false for dislike/swipe left
-    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
-
-    public User? FromUser { get; set; }
-    public User? ToUser { get; set; } // Note: The Many() side here is implicit, used for lookups
-}
-
-public class UserSuggestionQueue
-{
-    public int Id { get; set; }
-    public int UserId { get; set; }
-    public int SuggestedUserId { get; set; }
-    public int QueuePosition { get; set; }
-    public double CompatibilityScore { get; set; }
-    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
-
-    public User User { get; set; } = null!;
-    public User SuggestedUser { get; set; } = null!;
-}
-
-
 // =======================================================
 // ===== DATABASE CONTEXT =====
 // =======================================================
@@ -109,7 +35,7 @@ public class AppDbContext : DbContext
         // FromUser is the user initiating the like
         modelBuilder.Entity<Like>()
             .HasOne(l => l.FromUser)
-            .WithMany(u => u.Likes)
+            .WithMany(u => u.Swipes)
             .HasForeignKey(l => l.FromUserId)
             .OnDelete(DeleteBehavior.Restrict);
 
@@ -128,7 +54,7 @@ public class AppDbContext : DbContext
         // ===== UserSuggestionQueue Configuration =====
         modelBuilder.Entity<UserSuggestionQueue>(entity =>
         {
-            entity.HasKey(e => e.Id);
+            entity.HasKey(e => e.UserId);
 
             entity.HasOne(e => e.User) // The user whose queue this is
                     .WithMany()
@@ -160,7 +86,7 @@ public class AppDbContext : DbContext
 // ===== PASSWORD UTILS =====
 public static class PasswordHasher
 {
-        public static string HashPassword(string password)
+    public static string HashPassword(string password)
     {
         using var sha256 = System.Security.Cryptography.SHA256.Create();
         var bytes = Encoding.UTF8.GetBytes(password + "SpotiLove_Salt");
@@ -178,25 +104,6 @@ public static class PasswordHasher
 }
 
 // ===== DTOs (Data Transfer Objects) =====
-public class MusicProfileDto
-{
-    public string? FavoriteSongs { get; set; }
-    public string? FavoriteArtists { get; set; }
-    public string? FavoriteGenres { get; set; }
-}
-
-public class UserDto
-{
-    public int Id { get; set; }
-    public string? Name { get; set; }
-    public string? Email { get; set; }
-    public int Age { get; set; }
-    public string? Location { get; set; }
-    public string? Bio { get; set; }
-    public MusicProfileDto? MusicProfile { get; set; }
-    public List<string>? Images { get; set; }
-}
-
 public class TakeExUsersResponse
 {
     public bool Success { get; set; }
