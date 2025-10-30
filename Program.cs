@@ -455,89 +455,7 @@ app.MapPost("/seed-database", async (AppDbContext db) =>
     }
 });
 
-// Spotify Login (for existing users)
-app.MapGet("/auth/spotify/login", (SpotifyService spotify) =>
-{
-    var loginUrl = spotify.GetLoginUrl();
-    return Results.Redirect(loginUrl);
-})
-.WithName("SpotifyLogin")
-.WithSummary("Redirects to Spotify OAuth for login");
-
-// Spotify Sign Up (for new users)
-app.MapGet("/auth/spotify/signup", (SpotifyService spotify) =>
-{
-    var signupUrl = spotify.GetLoginUrl(); // Same OAuth flow, different handling in callback
-    return Results.Redirect(signupUrl);
-})
-.WithName("SpotifySignUp")
-.WithSummary("Redirects to Spotify OAuth for signup");
-
-// Optional: Endpoint to manually sync Spotify music profile for existing users
-app.MapPost("/auth/spotify/sync-profile/{userId:int}", async (
-    int userId,
-    SpotifyService spotify,
-    AppDbContext db) =>
-{
-    try
-    {
-        var user = await db.Users
-            .Include(u => u.MusicProfile)
-            .FirstOrDefaultAsync(u => u.Id == userId);
-
-        if (user == null)
-            return Results.NotFound(new { success = false, message = "User not found" });
-
-        // Fetch latest music data from Spotify
-        var topSongs = await spotify.GetUserTopSongsAsync(10);
-        var topArtists = await spotify.GetUserTopArtistsAsync(10);
-        var topGenres = await spotify.GetUserTopGenresAsync(20);
-
-        if (user.MusicProfile == null)
-        {
-            user.MusicProfile = new MusicProfile
-            {
-                UserId = userId,
-                FavoriteGenres = string.Join(", ", topGenres),
-                FavoriteArtists = string.Join(", ", topArtists),
-                FavoriteSongs = string.Join(", ", topSongs)
-            };
-        }
-        else
-        {
-            user.MusicProfile.FavoriteGenres = string.Join(", ", topGenres);
-            user.MusicProfile.FavoriteArtists = string.Join(", ", topArtists);
-            user.MusicProfile.FavoriteSongs = string.Join(", ", topSongs);
-        }
-
-        await db.SaveChangesAsync();
-
-        return Results.Ok(new
-        {
-            success = true,
-            message = "Music profile synced successfully",
-            musicProfile = new
-            {
-                user.MusicProfile.FavoriteGenres,
-                user.MusicProfile.FavoriteArtists,
-                user.MusicProfile.FavoriteSongs
-            }
-        });
-    }
-    catch (Exception ex)
-    {
-        return Results.Problem(
-            detail: ex.Message,
-            title: "Failed to sync music profile",
-            statusCode: 500
-        );
-    }
-})
-.WithName("SyncSpotifyProfile")
-.WithSummary("Manually sync Spotify music profile for an existing user");
-// ---- Spotify Authentication Endpoints ----
-
-// Spotify Login/Signup (unified endpoint)
+// 1. Login trigger
 app.MapGet("/login", (SpotifyService spotify) =>
 {
     var loginUrl = spotify.GetLoginUrl();
@@ -1026,12 +944,6 @@ app.MapPost("/swipe/{fromUserId:int}/pass/{toUserId:int}", SwipeEndpoints.PassUs
 app.MapGet("/matches/{userId:int}", SwipeEndpoints.GetUserMatches);
 app.MapGet("/swipe/stats/{userId:int}", SwipeEndpoints.GetSwipeStats);
 
-// ---- Spotify Integration Endpoints ----
-app.MapGet("/login", (SpotifyService spotify) =>
-{
-    var url = spotify.GetLoginUrl();
-    return Results.Redirect(url);
-});
 Console.WriteLine("🎯 Spotilove API is starting...");
 Console.WriteLine($"🌐 Running on port: {port}");
 Console.WriteLine("🤖 Gemini AI compatibility calculation enabled");
