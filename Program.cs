@@ -27,8 +27,8 @@ builder.Services.AddScoped<IPasswordHasher<User>, PasswordHasher<User>>();
 
 // SpotifyService setup (Singleton since it holds state)
 builder.Services.AddSingleton(provider => new SpotifyService(
-    Environment.GetEnvironmentVariable("ClientKey") ?? throw new Exception("ClientKey missing"),
-    Environment.GetEnvironmentVariable("ClientSecret") ?? throw new Exception("ClientSecret missing"),
+    Environment.GetEnvironmentVariable("SpotifyClientKey") ?? throw new Exception("ClientKey missing"),
+    Environment.GetEnvironmentVariable("SpotifyClientSecret") ?? throw new Exception("ClientSecret missing"),
     Environment.GetEnvironmentVariable("RedirectURI") ?? throw new Exception("RedirectURI missing")
 ));
 

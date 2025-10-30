@@ -12,11 +12,11 @@ public class SpotifyService
 
     private string? _refreshToken; // Used to refresh tokens without user interaction
 
-    public SpotifyService()
+    public SpotifyService(string clientId, string clientSecret, string redirectUri)
     {
-        _clientId = Environment.GetEnvironmentVariable("SpotifyClientKey")!;
-        _clientSecret = Environment.GetEnvironmentVariable("SpotifyClientSecret")!;
-        _redirectUri = Environment.GetEnvironmentVariable("RedirectURI")!;
+        _clientId = clientId;
+        _clientSecret = clientSecret;
+        _redirectUri = redirectUri;
     }
     public string GetLoginUrl()
     {
