@@ -1008,9 +1008,6 @@ app.MapPost("/auth/login", async (
     });
 });
 
-// Keep all other endpoints as they were...
-// [Rest of your endpoints remain the same]
-
 // ---- User Management Endpoints ----
 app.MapPost("/users", Endpoints.CreateUser);
 app.MapGet("/users/{id:int}", Endpoints.GetUser);
