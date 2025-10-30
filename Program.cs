@@ -474,7 +474,7 @@ app.MapGet("/auth/spotify/signup", (SpotifyService spotify) =>
 .WithSummary("Redirects to Spotify OAuth for signup");
 
 // Spotify OAuth Callback - handles both login and signup
-app.MapGet("/callback", async (
+app.MapGet("/SpotifyCallback", async (
     HttpRequest req,
     SpotifyService spotify,
     AppDbContext db,
