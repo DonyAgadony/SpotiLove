@@ -48,19 +48,27 @@ var app = builder.Build();
 app.UseCors("AllowAll");
 
 // ---- Database Migration ----
+// Program.cs
+
+// Seed database
 using (var scope = app.Services.CreateScope())
 {
     var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-    db.Database.Migrate();
+    // 1. Ensure the database is created and up-to-date
+    await db.Database.MigrateAsync();
 
-    // Auto-seed database if empty on startup
-    if (!await db.Users.AnyAsync())
+    // 2. CHECK IF USERS ALREADY EXIST
+    if (!await db.Users.AnyAsync()) // <--- ADD THIS CONDITIONAL CHECK
     {
-        Console.WriteLine("🌱 Database is empty. Auto-seeding with example users...");
+        // Only seed if no users are found
         await SeedDatabaseAsync(db);
+        Console.WriteLine($"✅ Seeded database with 100 users");
+    }
+    else
+    {
+        Console.WriteLine("✅ Database already seeded. Skipping initialization.");
     }
 }
-
 // ---- Development Tools ----
 if (app.Environment.IsDevelopment())
 {
