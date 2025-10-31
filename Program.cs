@@ -4,6 +4,7 @@ using DotNetEnv;
 using Microsoft.AspNetCore.Identity;
 using System.Text.Json.Serialization;
 using static Spotilove.AppDbContext;
+using Microsoft.AspNetCore.Mvc;
 
 DotNetEnv.Env.Load(); // load .env file
 
@@ -96,29 +97,24 @@ app.MapGet("/", () => Results.Ok(new
         swagger = "/swagger"
     }
 }));
-app.MapGet("/users", async (AppDbContext db, HttpRequest request) =>
+app.MapGet("/users", async (AppDbContext db, [FromQuery] int? userId, [FromQuery] int? count) =>
 {
     try
     {
-        // Parse query parameters
-        if (!request.Query.ContainsKey("userId") ||
-            !int.TryParse(request.Query["userId"], out int currentUserId))
+        // ✅ Validate required userId
+        if (userId == null || userId <= 0)
         {
             return Results.BadRequest(new TakeExUsersResponse
             {
                 Success = false,
                 Count = 0,
-                Users = new()
+                Users = new(),
+                Message = "Missing or invalid userId query parameter"
             });
         }
 
-        // Optional: allow requesting more users
-        int requestedCount = 10;
-        if (request.Query.ContainsKey("count") &&
-            int.TryParse(request.Query["count"], out int count))
-        {
-            requestedCount = Math.Clamp(count, 1, 50);
-        }
+        int currentUserId = userId.Value;
+        int requestedCount = Math.Clamp(count ?? 10, 1, 50);
 
         // 1️⃣ Load current user + profile
         var currentUser = await db.Users
@@ -132,11 +128,12 @@ app.MapGet("/users", async (AppDbContext db, HttpRequest request) =>
             {
                 Success = false,
                 Count = 0,
-                Users = new()
+                Users = new(),
+                Message = "User not found or missing music profile"
             });
         }
 
-        // 2️⃣ Fetch existing data in parallel
+        // 2️⃣ Fetch swiped, queued, and total users in parallel
         var swipedTask = db.Likes
             .Where(l => l.FromUserId == currentUserId)
             .AsNoTracking()
@@ -172,9 +169,9 @@ app.MapGet("/users", async (AppDbContext db, HttpRequest request) =>
 
             var candidateIds = await db.Users
                 .Where(u => u.Id != currentUserId &&
-                           u.MusicProfile != null &&
-                           !swipedUserIds.Contains(u.Id) &&
-                           !queuedUserIds.Contains(u.Id))
+                            u.MusicProfile != null &&
+                            !swipedUserIds.Contains(u.Id) &&
+                            !queuedUserIds.Contains(u.Id))
                 .AsNoTracking()
                 .Select(u => u.Id)
                 .Take(batchSize)
@@ -218,7 +215,6 @@ app.MapGet("/users", async (AppDbContext db, HttpRequest request) =>
 
                 try
                 {
-                    // 🔒 Prevent duplicate insert conflicts
                     var existingPairs = await db.UserSuggestionQueues
                         .Where(q => q.UserId == currentUserId &&
                                     candidateIds.Contains(q.SuggestedUserId))
@@ -241,7 +237,6 @@ app.MapGet("/users", async (AppDbContext db, HttpRequest request) =>
                             .Take(requestedCount * 3)
                             .ToList();
 
-                        // Optional: background Gemini score refinement
                         var idsToUpdate = scoredCandidates
                             .Where(s => s.Score >= 60)
                             .Take(10)
@@ -322,7 +317,7 @@ app.MapGet("/users", async (AppDbContext db, HttpRequest request) =>
 })
 .WithName("GetUsersForSwipe")
 .WithSummary("Get personalized user suggestions with smart caching")
-.WithDescription("Returns users sorted by compatibility score. Supports ?userId={id}&count={1-50}");
+.WithDescription("Requires ?userId={id} and optional &count={1–50} for results.");
 
 // ===== HELPER FUNCTIONS =====
 static UserDto ToUserDto(User user) => new()
