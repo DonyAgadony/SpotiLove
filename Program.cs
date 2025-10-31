@@ -96,7 +96,6 @@ app.MapGet("/", () => Results.Ok(new
         swagger = "/swagger"
     }
 }));
-
 app.MapGet("/users", async (AppDbContext db, HttpRequest request) =>
 {
     try
@@ -113,7 +112,7 @@ app.MapGet("/users", async (AppDbContext db, HttpRequest request) =>
             });
         }
 
-        // Optional: Allow requesting more users (default 10, max 50)
+        // Optional: allow requesting more users
         int requestedCount = 10;
         if (request.Query.ContainsKey("count") &&
             int.TryParse(request.Query["count"], out int count))
@@ -121,7 +120,7 @@ app.MapGet("/users", async (AppDbContext db, HttpRequest request) =>
             requestedCount = Math.Clamp(count, 1, 50);
         }
 
-        // OPTIMIZATION 1: Single query for current user
+        // 1️⃣ Load current user + profile
         var currentUser = await db.Users
             .Include(u => u.MusicProfile)
             .AsNoTracking()
@@ -137,7 +136,7 @@ app.MapGet("/users", async (AppDbContext db, HttpRequest request) =>
             });
         }
 
-        // OPTIMIZATION 2: Parallel data fetching (3 queries at once)
+        // 2️⃣ Fetch existing data in parallel
         var swipedTask = db.Likes
             .Where(l => l.FromUserId == currentUserId)
             .AsNoTracking()
@@ -163,13 +162,12 @@ app.MapGet("/users", async (AppDbContext db, HttpRequest request) =>
 
         Console.WriteLine($"📊 User {currentUserId}: {queueItems.Count} queued, {swipedUserIds.Count} swiped, {totalAvailable} total");
 
-        // OPTIMIZATION 3: Check if we need to populate queue
+        // 3️⃣ Refill queue if needed
         var queuedUserIds = queueItems.Select(q => q.SuggestedUserId).ToHashSet();
         bool needsQueueRefill = queueItems.Count < requestedCount * 2;
 
         if (needsQueueRefill && totalAvailable > swipedUserIds.Count + queuedUserIds.Count)
         {
-            // BATCH PROCESS: Calculate scores for multiple users at once
             int batchSize = Math.Min(50, requestedCount * 3);
 
             var candidateIds = await db.Users
@@ -186,16 +184,14 @@ app.MapGet("/users", async (AppDbContext db, HttpRequest request) =>
             {
                 Console.WriteLine($"🔄 Batch processing {candidateIds.Count} new candidates...");
 
-                // Fetch all candidates in ONE query
                 var candidates = await db.Users
                     .Include(u => u.MusicProfile)
                     .Where(u => candidateIds.Contains(u.Id))
                     .AsNoTracking()
                     .ToListAsync();
 
-                // PARALLEL LOCAL CALCULATION (instant, no API calls)
                 var scoredCandidates = candidates
-                    .AsParallel() // Use parallel processing for speed
+                    .AsParallel()
                     .Select(user => new
                     {
                         UserId = user.Id,
@@ -206,7 +202,6 @@ app.MapGet("/users", async (AppDbContext db, HttpRequest request) =>
                     .OrderByDescending(x => x.Score)
                     .ToList();
 
-                // BATCH INSERT to queue (single DB operation)
                 int nextPosition = queueItems.Any()
                     ? queueItems.Max(q => q.QueuePosition) + 1
                     : 0;
@@ -223,29 +218,46 @@ app.MapGet("/users", async (AppDbContext db, HttpRequest request) =>
 
                 try
                 {
-                    db.UserSuggestionQueues.AddRange(batchInserts);
-                    await db.SaveChangesAsync();
-                    Console.WriteLine($"✅ Batch inserted {batchInserts.Count} queue items");
+                    // 🔒 Prevent duplicate insert conflicts
+                    var existingPairs = await db.UserSuggestionQueues
+                        .Where(q => q.UserId == currentUserId &&
+                                    candidateIds.Contains(q.SuggestedUserId))
+                        .Select(q => q.SuggestedUserId)
+                        .ToListAsync();
 
-                    // Merge new items into queue for immediate use
-                    queueItems.AddRange(batchInserts);
-                    queueItems = queueItems
-                        .OrderByDescending(q => q.CompatibilityScore)
-                        .Take(requestedCount * 3)
+                    var newInserts = batchInserts
+                        .Where(b => !existingPairs.Contains(b.SuggestedUserId))
                         .ToList();
 
-                    // Fire-and-forget: Update with Gemini scores in background
-                    var idsToUpdate = scoredCandidates
-                        .Where(s => s.Score >= 60)
-                        .Take(10)
-                        .Select(s => s.UserId)
-                        .ToList();
-
-                    if (idsToUpdate.Any())
+                    if (newInserts.Any())
                     {
-                        _ = Task.Run(() => UpdateQueueScoresInBackground(
-                            currentUserId,
-                            idsToUpdate));
+                        db.UserSuggestionQueues.AddRange(newInserts);
+                        await db.SaveChangesAsync();
+                        Console.WriteLine($"✅ Batch inserted {newInserts.Count} queue items (filtered from {batchInserts.Count})");
+
+                        queueItems.AddRange(newInserts);
+                        queueItems = queueItems
+                            .OrderByDescending(q => q.CompatibilityScore)
+                            .Take(requestedCount * 3)
+                            .ToList();
+
+                        // Optional: background Gemini score refinement
+                        var idsToUpdate = scoredCandidates
+                            .Where(s => s.Score >= 60)
+                            .Take(10)
+                            .Select(s => s.UserId)
+                            .ToList();
+
+                        if (idsToUpdate.Any())
+                        {
+                            _ = Task.Run(() => UpdateQueueScoresInBackground(
+                                currentUserId,
+                                idsToUpdate));
+                        }
+                    }
+                    else
+                    {
+                        Console.WriteLine("⚠️ All candidates already existed in queue, skipping insert.");
                     }
                 }
                 catch (DbUpdateException ex)
@@ -255,7 +267,7 @@ app.MapGet("/users", async (AppDbContext db, HttpRequest request) =>
             }
         }
 
-        // OPTIMIZATION 4: Get top suggestions from queue
+        // 4️⃣ Return top suggestions
         var topSuggestionIds = queueItems
             .Take(requestedCount)
             .Select(q => q.SuggestedUserId)
@@ -272,7 +284,7 @@ app.MapGet("/users", async (AppDbContext db, HttpRequest request) =>
             });
         }
 
-        // OPTIMIZATION 5: Fetch user details in ONE query
+        // 5️⃣ Fetch user details
         var users = await db.Users
             .Include(u => u.MusicProfile)
             .Include(u => u.Images)
@@ -280,14 +292,12 @@ app.MapGet("/users", async (AppDbContext db, HttpRequest request) =>
             .AsNoTracking()
             .ToListAsync();
 
-        // Preserve queue ordering
         var userDict = users.ToDictionary(u => u.Id);
         var orderedUsers = topSuggestionIds
             .Where(id => userDict.ContainsKey(id))
             .Select(id => userDict[id])
             .ToList();
 
-        // Convert to DTOs
         var suggestions = orderedUsers.Select(ToUserDto).ToList();
 
         return Results.Ok(new TakeExUsersResponse
