@@ -9,12 +9,8 @@ using Microsoft.EntityFrameworkCore; // Required for LINQ usage in DtoMappers
 namespace Spotilove;
 
 // =======================================================
-// ===== DATABASE ENTITIES (MODELS) ======================
+// ============ DATABASE ENTITIES (MODELS) ===============
 // =======================================================
-
-/// <summary>
-/// Core User Entity (Stored in the database)
-/// </summary>
 public class User
 {
     // Primary Key
