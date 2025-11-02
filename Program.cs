@@ -105,6 +105,36 @@ app.MapGet("/", () => Results.Ok(new
         swagger = "/swagger"
     }
 }));
+// Temporary debug endpoint
+app.MapGet("/debug/user/{id:int}", async (AppDbContext db, int id) =>
+{
+    var user = await db.Users
+        .Include(u => u.MusicProfile)
+        .FirstOrDefaultAsync(u => u.Id == id);
+
+    if (user == null)
+    {
+        return Results.Ok(new { exists = false, message = $"User {id} not found" });
+    }
+
+    return Results.Ok(new
+    {
+        exists = true,
+        user = new
+        {
+            user.Id,
+            user.Name,
+            user.Email,
+            hasMusicProfile = user.MusicProfile != null,
+            musicProfile = user.MusicProfile != null ? new
+            {
+                genres = user.MusicProfile.FavoriteGenres,
+                artists = user.MusicProfile.FavoriteArtists,
+                songs = user.MusicProfile.FavoriteSongs
+            } : null
+        }
+    });
+});
 app.MapGet("/users", async (AppDbContext db, [FromQuery] int? userId, [FromQuery] int? count) =>
 {
     try
