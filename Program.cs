@@ -356,6 +356,46 @@ app.MapGet("/users", async (AppDbContext db, [FromQuery] int? userId, [FromQuery
 .WithName("GetUsersForSwipe")
 .WithSummary("Get personalized user suggestions with smart caching")
 .WithDescription("Requires ?userId={id} and optional &count={1–50} for results.");
+// ---- Music Profile ----
+app.MapPost("/users/{id:int}/music-profile", async (AppDbContext db, int id, MusicProfileDto dto) =>
+{
+    var user = await db.Users
+        .Include(u => u.MusicProfile)
+        .FirstOrDefaultAsync(u => u.Id == id);
+
+    if (user == null)
+        return Results.NotFound(new { success = false, message = "User not found" });
+
+    if (user.MusicProfile == null)
+    {
+        // create new profile
+        user.MusicProfile = new MusicProfile
+        {
+            UserId = id,
+            FavoriteGenres = dto.FavoriteGenres,
+            FavoriteArtists = dto.FavoriteArtists,
+            FavoriteSongs = dto.FavoriteSongs
+        };
+        db.MusicProfiles.Add(user.MusicProfile);
+    }
+    else
+    {
+        // update existing profile
+        user.MusicProfile.FavoriteGenres = dto.FavoriteGenres;
+        user.MusicProfile.FavoriteArtists = dto.FavoriteArtists;
+        user.MusicProfile.FavoriteSongs = dto.FavoriteSongs;
+    }
+
+    await db.SaveChangesAsync();
+
+    return Results.Ok(new
+    {
+        success = true,
+        message = "Music profile added/updated successfully",
+        profile = dto
+    });
+});
+
 
 // ===== HELPER FUNCTIONS =====
 static UserDto ToUserDto(User user) => new()

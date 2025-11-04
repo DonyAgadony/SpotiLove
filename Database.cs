@@ -92,6 +92,7 @@ public class AppDbContext : DbContext
     }
 }
 
+
 // ===== PASSWORD UTILS =====
 public static class PasswordHasher
 {
