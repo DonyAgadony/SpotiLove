@@ -160,6 +160,8 @@ app.MapGet("/users", async (AppDbContext db, [FromQuery] int? userId, [FromQuery
             .AsNoTracking()
             .FirstOrDefaultAsync(u => u.Id == currentUserId);
 
+        System.Console.WriteLine(currentUser?.MusicProfile);
+
         if (currentUser?.MusicProfile == null)
         {
             return Results.NotFound(new TakeExUsersResponse
