@@ -583,6 +583,8 @@ app.MapGet("/login", (SpotifyService spotify) =>
 .WithSummary("Redirects to Spotify OAuth (handles both login and signup)");
 
 // SINGLE Spotify OAuth Callback - handles both login and signup
+// Replace your /callback endpoint with this fixed version
+
 app.MapGet("/callback", async (
     HttpRequest req,
     SpotifyService spotify,
@@ -594,7 +596,6 @@ app.MapGet("/callback", async (
         var code = req.Query["code"].ToString();
         var error = req.Query["error"].ToString();
 
-        // Handle user declining authorization
         if (!string.IsNullOrEmpty(error))
         {
             var errorRedirect = "spotilove://auth/error?message=Authorization declined";
@@ -609,11 +610,9 @@ app.MapGet("/callback", async (
 
         Console.WriteLine($"🔐 Spotify callback received with code");
 
-        // Connect to Spotify and get access token
         await spotify.ConnectUserAsync(code);
         Console.WriteLine("✅ Connected to Spotify API");
 
-        // Fetch Spotify profile
         var spotifyProfile = await spotify.GetUserProfileAsync();
 
         if (spotifyProfile == null || string.IsNullOrEmpty(spotifyProfile.Email))
@@ -624,7 +623,6 @@ app.MapGet("/callback", async (
 
         Console.WriteLine($"📧 Spotify email: {spotifyProfile.Email}");
 
-        // Check if user exists
         var existingUser = await db.Users
             .Include(u => u.MusicProfile)
             .FirstOrDefaultAsync(u => u.Email == spotifyProfile.Email);
@@ -634,9 +632,7 @@ app.MapGet("/callback", async (
 
         if (existingUser == null)
         {
-            // CREATE NEW USER (Sign Up flow)
             isNewUser = true;
-
             var randomPassword = Guid.NewGuid().ToString();
             var hashedPassword = hasher.HashPassword(null!, randomPassword);
 
@@ -663,7 +659,6 @@ app.MapGet("/callback", async (
         }
         else
         {
-            // EXISTING USER (Login flow)
             user = existingUser;
             user.LastLoginAt = DateTime.UtcNow;
             await db.SaveChangesAsync();
@@ -671,7 +666,11 @@ app.MapGet("/callback", async (
             Console.WriteLine($"✅ Existing user logged in: {user.Email} (ID: {user.Id})");
         }
 
-        // Fetch and update music profile from Spotify (async, don't block redirect)
+        // 🔥 FIX: Store connection string and user ID, not the db context
+        var connectionString = db.Database.GetConnectionString();
+        var userId = user.Id;
+
+        // Background music profile update with NEW db context
         _ = Task.Run(async () =>
         {
             try
@@ -680,16 +679,15 @@ app.MapGet("/callback", async (
                 var topArtists = await spotify.GetUserTopArtistsAsync(10);
                 var topGenres = await spotify.GetUserTopGenresAsync(20);
 
-                // Create a new DB context for this background task
+                // 🔥 FIX: Create a NEW DbContext in the background task
                 var optionsBuilder = new DbContextOptionsBuilder<AppDbContext>();
-                var connectionString = db.Database.GetConnectionString();
                 optionsBuilder.UseSqlite(connectionString);
 
                 using var bgDb = new AppDbContext(optionsBuilder.Options);
 
                 var bgUser = await bgDb.Users
                     .Include(u => u.MusicProfile)
-                    .FirstOrDefaultAsync(u => u.Id == user.Id);
+                    .FirstOrDefaultAsync(u => u.Id == userId);
 
                 if (bgUser != null)
                 {
@@ -723,15 +721,11 @@ app.MapGet("/callback", async (
             }
         });
 
-        // Generate auth token
         var token = Guid.NewGuid().ToString();
-
-        // Build deep link URL to redirect back to the app
         var deepLinkUrl = $"spotilove://auth/success?token={Uri.EscapeDataString(token)}&userId={user.Id}&isNewUser={isNewUser}&name={Uri.EscapeDataString(user.Name ?? "User")}";
 
         Console.WriteLine($"🔗 Redirecting to: {deepLinkUrl}");
 
-        // Return an HTML page that auto-redirects
         var html = $@"
 <!DOCTYPE html>
 <html>
