@@ -399,7 +399,7 @@ app.MapPost("/fix-user101", async (AppDbContext db) =>
 {
     var user = await db.Users
         .Include(u => u.MusicProfile)
-        .FirstOrDefaultAsync(u => u.Id == 101);
+        .FirstOrDefaultAsync(u => u.Id == 1);
 
     if (user == null)
         return Results.NotFound("❌ User 101 not found");
@@ -408,7 +408,7 @@ app.MapPost("/fix-user101", async (AppDbContext db) =>
     {
         user.MusicProfile = new MusicProfile
         {
-            UserId = 101,
+            UserId = 1,
             FavoriteGenres = "Pop, Indie, R&B, Soul",
             FavoriteArtists = "Adele, Ed Sheeran, The Weeknd, Billie Eilish, Coldplay",
             FavoriteSongs = "Someone Like You, Shape of You, Blinding Lights, Fix You, Ocean Eyes"
