@@ -48,8 +48,6 @@ var app = builder.Build();
 app.UseCors("AllowAll");
 
 // ---- Database Migration ----
-// Program.cs
-
 // Seed database
 using (var scope = app.Services.CreateScope())
 {
@@ -79,7 +77,6 @@ if (app.Environment.IsDevelopment())
 // ---- Server Configuration ----
 var port = Environment.GetEnvironmentVariable("PORT") ?? "10000";
 app.Urls.Add($"http://0.0.0.0:{port}");
-
 // ================== API Endpoints ====================
 // ---- Health Check ----
 app.MapGet("/", () => Results.Ok(new
@@ -395,6 +392,42 @@ app.MapPost("/users/{id:int}/music-profile", async (AppDbContext db, int id, Mus
         success = true,
         message = "Music profile added/updated successfully",
         profile = dto
+    });
+});
+// ---- One-time patch: Ensure user 101 has a real music profile ----
+app.MapPost("/fix-user101", async (AppDbContext db) =>
+{
+    var user = await db.Users
+        .Include(u => u.MusicProfile)
+        .FirstOrDefaultAsync(u => u.Id == 101);
+
+    if (user == null)
+        return Results.NotFound("❌ User 101 not found");
+
+    if (user.MusicProfile == null)
+    {
+        user.MusicProfile = new MusicProfile
+        {
+            UserId = 101,
+            FavoriteGenres = "Pop, Indie, R&B, Soul",
+            FavoriteArtists = "Adele, Ed Sheeran, The Weeknd, Billie Eilish, Coldplay",
+            FavoriteSongs = "Someone Like You, Shape of You, Blinding Lights, Fix You, Ocean Eyes"
+        };
+        db.MusicProfiles.Add(user.MusicProfile);
+    }
+    else
+    {
+        user.MusicProfile.FavoriteGenres = "Pop, Indie, R&B, Soul";
+        user.MusicProfile.FavoriteArtists = "Adele, Ed Sheeran, The Weeknd, Billie Eilish, Coldplay";
+        user.MusicProfile.FavoriteSongs = "Someone Like You, Shape of You, Blinding Lights, Fix You, Ocean Eyes";
+    }
+
+    await db.SaveChangesAsync();
+
+    return Results.Ok(new
+    {
+        success = true,
+        message = "🎧 Updated user 101 with a real music profile"
     });
 });
 
