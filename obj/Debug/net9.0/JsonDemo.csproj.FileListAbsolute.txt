@@ -163,3 +163,5 @@ C:\Users\User\Desktop\DanielHamelech\SpotiLove\JsonDemo\obj\Debug\net9.0\rjimswa
 C:\Users\User\Desktop\DanielHamelech\SpotiLove\JsonDemo\obj\Debug\net9.0\rjsmrazor.dswa.cache.json
 C:\Users\User\Desktop\DanielHamelech\SpotiLove\JsonDemo\obj\Debug\net9.0\rjsmcshtml.dswa.cache.json
 C:\Users\User\Desktop\DanielHamelech\SpotiLove\JsonDemo\obj\Debug\net9.0\staticwebassets.build.json.cache
+C:\Users\User\Desktop\DanielHamelech\SpotiLove\JsonDemo\bin\Debug\net9.0\Npgsql.dll
+C:\Users\User\Desktop\DanielHamelech\SpotiLove\JsonDemo\bin\Debug\net9.0\Npgsql.EntityFrameworkCore.PostgreSQL.dll

@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using SpotifyAPI.Web;
+using System.Text.Json;
 
 namespace Spotilove;
 
@@ -9,6 +10,11 @@ public class SpotifyService
     private readonly string _clientId;
     private readonly string _clientSecret;
     private readonly string _redirectUri;
+
+    /// <summary>
+    /// A record to hold artist information including their name and image URL.
+    /// </summary>
+    public record ArtistInfo(string Name, string? ImageUrl);
 
     private string? _refreshToken; // Used to refresh tokens without user interaction
 
@@ -67,6 +73,22 @@ public class SpotifyService
         _refreshToken = response.RefreshToken ?? _refreshToken;
     }
 
+    /// <summary>
+    /// Ensures the Spotify client is authenticated, using client credentials as a fallback.
+    /// This is useful for non-user-specific requests like searching or browsing public playlists.
+    /// </summary>
+    private async Task EnsureClientIsAuthenticatedAsync()
+    {
+        // If we already have a user-authenticated client, we're good.
+        if (_spotify != null) return;
+
+        // Otherwise, authenticate using client credentials (app-level authentication).
+        var config = SpotifyClientConfig.CreateDefault();
+        var request = new ClientCredentialsRequest(_clientId, _clientSecret);
+        var response = await new OAuthClient(config).RequestToken(request);
+
+        _spotify = new SpotifyClient(response.AccessToken);
+    }
     // ---------------------------
     // SPOTIFY DATA FETCHING
     // ---------------------------
@@ -79,18 +101,22 @@ public class SpotifyService
     /// <summary>
     /// Fetches the user's top artists for the short term (last 4 weeks).
     /// </summary>
-    public async Task<List<string>> GetUserTopArtistsAsync(int limit = 10)
+    public async Task<List<ArtistInfo>> GetUserTopArtistsWithImagesAsync(int limit = 10)
     {
         if (_spotify == null) throw new Exception("User not connected");
 
         var topArtists = await _spotify.Personalization.GetTopArtists(new PersonalizationTopRequest
         {
             Limit = limit,
-            TimeRangeParam = PersonalizationTopRequest.TimeRange.ShortTerm
+            TimeRangeParam = PersonalizationTopRequest.TimeRange.ShortTerm,
         });
 
-        return topArtists.Items?.Select(a => a.Name).ToList() ?? new List<string>();
+        return topArtists.Items?
+            .Select(a => new ArtistInfo(a.Name, a.Images.FirstOrDefault()?.Url))
+            .ToList()
+            ?? new List<ArtistInfo>();
     }
+
 
     /// <summary>
     /// Fetches the user's top tracks for the short term (last 4 weeks), formatted as "Song by Artist".
@@ -142,6 +168,53 @@ public class SpotifyService
                      .ToList();
     }
 
+    /// <summary>
+    /// Searches for artists on Spotify.
+    /// </summary>
+    /// <param name="query">The search term.</param>
+    /// <param name="limit">The number of results to return.</param>
+    /// <returns>A list of artists with their name and image.</returns>
+    public async Task<List<ArtistInfo>> SearchArtistsAsync(string query, int limit = 10)
+    {
+        await EnsureClientIsAuthenticatedAsync();
+        if (_spotify == null) throw new Exception("Could not authenticate with Spotify");
+
+        var searchRequest = new SearchRequest(SearchRequest.Types.Artist, query) { Limit = limit };
+        var searchResponse = await _spotify.Search.Item(searchRequest);
+
+        return searchResponse.Artists.Items?
+            .Select(a => new ArtistInfo(a.Name, a.Images.FirstOrDefault()?.Url))
+            .ToList()
+            ?? new List<ArtistInfo>();
+    }
+
+    /// <summary>
+    /// Gets a list of popular artists from Spotify's "Today's Top Hits" playlist.
+    /// </summary>
+    /// <param name="limit">The number of unique artists to return.</param>
+    /// <returns>A list of popular artists with their name and image.</returns>
+    public async Task<List<ArtistInfo>> GetPopularArtistsAsync(int limit = 20)
+    {
+        await EnsureClientIsAuthenticatedAsync();
+        if (_spotify == null) throw new Exception("Could not authenticate with Spotify");
+
+        // ID for the global "Today's Top Hits" playlist on Spotify
+        const string topHitsPlaylistId = "37i9dQZF1DXcBWIGoYBM5M";
+
+        var playlist = await _spotify.Playlists.Get(topHitsPlaylistId);
+
+        var artists = playlist.Tracks?.Items?
+            .SelectMany(item => item.Track is FullTrack track ? track.Artists : Enumerable.Empty<SimpleArtist>())
+            .Where(artist => artist != null)
+            .Select(artist => artist.Id) // Use ID for distinctness
+            .Distinct()
+            .Take(limit) // Take the first 'limit' unique artists
+            .Select(async artistId => await _spotify.Artists.Get(artistId)) // Fetch full artist details
+            .Select(task => task.Result) // Await the tasks
+            .Select(fullArtist => new ArtistInfo(fullArtist.Name, fullArtist.Images.FirstOrDefault()?.Url));
+
+        return artists?.ToList() ?? new List<ArtistInfo>();
+    }
     // ---------------------------
     // HELPER METHODS FOR SLUG GENERATION
     // ---------------------------
@@ -193,8 +266,7 @@ public class SpotifyService
         // 1. Fetch data from Spotify
         var profile = await GetUserProfileAsync();
         var songs = await GetUserTopSongsAsync();
-        var artists = await GetUserTopArtistsAsync();
-        // Use genres for the core compatibility data
+        var artistsWithImages = await GetUserTopArtistsWithImagesAsync();
         var genres = await GetUserTopGenresAsync();
 
         // Use song slugs for slightly more robust song matching/storage
@@ -224,7 +296,7 @@ public class SpotifyService
             user.MusicProfile = new MusicProfile
             {
                 FavoriteSongs = string.Join(", ", songs),
-                FavoriteArtists = string.Join(", ", artists),
+                FavoriteArtists = JsonSerializer.Serialize(artistsWithImages), // Store as JSON
                 // Storing genres as comma-separated list of slugs
                 FavoriteGenres = string.Join(",", genres),
             };
@@ -232,7 +304,7 @@ public class SpotifyService
         else
         {
             user.MusicProfile.FavoriteSongs = string.Join(", ", songs);
-            user.MusicProfile.FavoriteArtists = string.Join(", ", artists);
+            user.MusicProfile.FavoriteArtists = JsonSerializer.Serialize(artistsWithImages); // Store as JSON
             user.MusicProfile.FavoriteGenres = string.Join(",", genres);
         }
 
