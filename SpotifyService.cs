@@ -312,4 +312,94 @@ public class SpotifyService
         await db.SaveChangesAsync();
         return user;
     }
+    public async Task<List<SpotifySongDto>> GetArtistTopTracksAsync(string artistName, int limit = 10)
+    {
+        await EnsureClientIsAuthenticatedAsync();
+        if (_spotify == null) throw new Exception("Could not authenticate with Spotify");
+
+        try
+        {
+            // First, search for the artist
+            var searchRequest = new SearchRequest(SearchRequest.Types.Artist, artistName) { Limit = 1 };
+            var searchResponse = await _spotify.Search.Item(searchRequest);
+
+            var artist = searchResponse.Artists.Items?.FirstOrDefault();
+            if (artist == null)
+            {
+                Console.WriteLine($"Artist '{artistName}' not found");
+                return new List<SpotifySongDto>();
+            }
+
+            // Get the artist's top tracks
+            var topTracks = await _spotify.Artists.GetTopTracks(artist.Id, new ArtistsTopTracksRequest("US"));
+
+            return topTracks.Tracks
+                .Take(limit)
+                .Select(track => new SpotifySongDto
+                {
+                    Title = track.Name,
+                    Artist = string.Join(", ", track.Artists.Select(a => a.Name))
+                })
+                .ToList();
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error getting tracks for artist '{artistName}': {ex.Message}");
+            return new List<SpotifySongDto>();
+        }
+    }
+
+    /// <summary>
+    /// Gets genres from a list of artist names.
+    /// </summary>
+    public async Task<List<string>> GetGenresFromArtistsAsync(List<string> artistNames)
+    {
+        await EnsureClientIsAuthenticatedAsync();
+        if (_spotify == null) throw new Exception("Could not authenticate with Spotify");
+
+        var allGenres = new List<string>();
+
+        foreach (var artistName in artistNames)
+        {
+            try
+            {
+                // Search for the artist
+                var searchRequest = new SearchRequest(SearchRequest.Types.Artist, artistName) { Limit = 1 };
+                var searchResponse = await _spotify.Search.Item(searchRequest);
+
+                var artist = searchResponse.Artists.Items?.FirstOrDefault();
+                if (artist == null) continue;
+
+                // Get full artist details for genres
+                var fullArtist = await _spotify.Artists.Get(artist.Id);
+
+                if (fullArtist.Genres != null && fullArtist.Genres.Count > 0)
+                {
+                    allGenres.AddRange(fullArtist.Genres);
+                }
+
+                // Small delay to avoid rate limiting
+                await Task.Delay(100);
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Error getting genres for '{artistName}': {ex.Message}");
+            }
+        }
+
+        // Return unique genres, sorted by frequency
+        return allGenres
+            .GroupBy(g => g)
+            .OrderByDescending(g => g.Count())
+            .Select(g => g.Key)
+            .Take(20)
+            .ToList();
+    }
+
+    // DTO for song response
+    public class SpotifySongDto
+    {
+        public string Title { get; set; } = "";
+        public string Artist { get; set; } = "";
+    }
 }

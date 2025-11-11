@@ -152,39 +152,145 @@ app.MapGet("/debug/user/{id:int}", async (AppDbContext db, int id) =>
         }
     });
 });
-
-// ===========================================================
-// 🎧 FIX USER 101 MUSIC PROFILE (one-time command)
-// ===========================================================
-app.MapPost("/fix-user101", async (AppDbContext db) =>
+// Get popular artists for selection
+app.MapGet("/spotify/popular-artists", async (SpotifyService spotifyService, int limit = 20) =>
 {
-    var user = await db.Users.Include(u => u.MusicProfile).FirstOrDefaultAsync(u => u.Id == 101);
-
-    if (user == null)
-        return Results.NotFound("❌ User 101 not found");
-
-    if (user.MusicProfile == null)
+    try
     {
-        user.MusicProfile = new MusicProfile
+        var artists = await spotifyService.GetPopularArtistsAsync(limit);
+        return Results.Ok(artists);
+    }
+    catch (Exception ex)
+    {
+        Console.WriteLine($"❌ Error fetching popular artists: {ex.Message}");
+        return Results.Problem(detail: ex.Message, title: "Failed to fetch popular artists");
+    }
+})
+.WithName("GetPopularArtists")
+.WithSummary("Get popular artists from Spotify's Top Hits playlist");
+
+// Search for artists
+app.MapGet("/spotify/search-artists", async (SpotifyService spotifyService, string query, int limit = 20) =>
+{
+    try
+    {
+        if (string.IsNullOrWhiteSpace(query))
+            return Results.BadRequest("Query parameter is required");
+
+        var artists = await spotifyService.SearchArtistsAsync(query, limit);
+        return Results.Ok(artists);
+    }
+    catch (Exception ex)
+    {
+        Console.WriteLine($"❌ Error searching artists: {ex.Message}");
+        return Results.Problem(detail: ex.Message, title: "Failed to search artists");
+    }
+})
+.WithName("SearchArtists")
+.WithSummary("Search for artists on Spotify");
+
+// Get top tracks from a specific artist
+app.MapGet("/spotify/artist-top-tracks", async (SpotifyService spotifyService, string artistName, int limit = 10) =>
+{
+    try
+    {
+        if (string.IsNullOrWhiteSpace(artistName))
+            return Results.BadRequest("Artist name is required");
+
+        var tracks = await spotifyService.GetArtistTopTracksAsync(artistName, limit);
+        return Results.Ok(tracks);
+    }
+    catch (Exception ex)
+    {
+        Console.WriteLine($"❌ Error fetching artist tracks: {ex.Message}");
+        return Results.Problem(detail: ex.Message, title: "Failed to fetch artist tracks");
+    }
+})
+.WithName("GetArtistTopTracks")
+.WithSummary("Get top tracks from a specific artist");
+
+// Get genres from selected artists
+app.MapGet("/spotify/genres-from-artists", async (SpotifyService spotifyService, string artists) =>
+{
+    try
+    {
+        if (string.IsNullOrWhiteSpace(artists))
+            return Results.BadRequest("Artists parameter is required");
+
+        var artistList = artists.Split(',').Select(a => a.Trim()).ToList();
+        var genres = await spotifyService.GetGenresFromArtistsAsync(artistList);
+
+        return Results.Ok(genres);
+    }
+    catch (Exception ex)
+    {
+        Console.WriteLine($"❌ Error fetching genres: {ex.Message}");
+        return Results.Problem(detail: ex.Message, title: "Failed to fetch genres");
+    }
+})
+.WithName("GetGenresFromArtists")
+.WithSummary("Get genres based on selected artists");
+
+// Update user music profile
+app.MapPost("/users/{userId:int}/profile", async (
+    AppDbContext db,
+    int userId,
+    UpdateMusicProfileRequest request) =>
+{
+    try
+    {
+        var user = await db.Users
+            .Include(u => u.MusicProfile)
+            .FirstOrDefaultAsync(u => u.Id == userId);
+
+        if (user == null)
+            return Results.NotFound(new { success = false, message = "User not found" });
+
+        if (user.MusicProfile == null)
         {
-            UserId = 101,
-            FavoriteGenres = "Pop, Indie, R&B, Soul",
-            FavoriteArtists = "Adele, Ed Sheeran, The Weeknd, Billie Eilish, Coldplay",
-            FavoriteSongs = "Someone Like You, Shape of You, Blinding Lights, Fix You, Ocean Eyes"
-        };
-        db.MusicProfiles.Add(user.MusicProfile);
+            user.MusicProfile = new MusicProfile
+            {
+                UserId = userId,
+                FavoriteArtists = request.Artists,
+                FavoriteSongs = request.Songs,
+                FavoriteGenres = request.Genres
+            };
+            db.MusicProfiles.Add(user.MusicProfile);
+        }
+        else
+        {
+            user.MusicProfile.FavoriteArtists = request.Artists;
+            user.MusicProfile.FavoriteSongs = request.Songs;
+            user.MusicProfile.FavoriteGenres = request.Genres;
+        }
+
+        await db.SaveChangesAsync();
+
+        return Results.Ok(new
+        {
+            success = true,
+            message = "Music profile updated successfully",
+            user = new
+            {
+                user.Id,
+                user.Name,
+                musicProfile = new
+                {
+                    artists = user.MusicProfile.FavoriteArtists,
+                    songs = user.MusicProfile.FavoriteSongs,
+                    genres = user.MusicProfile.FavoriteGenres
+                }
+            }
+        });
     }
-    else
+    catch (Exception ex)
     {
-        user.MusicProfile.FavoriteGenres = "Pop, Indie, R&B, Soul";
-        user.MusicProfile.FavoriteArtists = "Adele, Ed Sheeran, The Weeknd, Billie Eilish, Coldplay";
-        user.MusicProfile.FavoriteSongs = "Someone Like You, Shape of You, Blinding Lights, Fix You, Ocean Eyes";
+        Console.WriteLine($"❌ Error updating music profile: {ex.Message}");
+        return Results.Problem(detail: ex.Message, title: "Failed to update music profile");
     }
-
-    await db.SaveChangesAsync();
-    return Results.Ok(new { success = true, message = "🎧 Updated user 101 with a real music profile" });
-});
-
+})
+.WithName("UpdateUserMusicProfile")
+.WithSummary("Update user's music profile with artists, songs, and genres");
 // ===========================================================
 // (Keep the rest of your endpoints exactly as-is below this)
 // ===========================================================
@@ -260,3 +366,9 @@ static async Task SeedDatabaseAsync(AppDbContext db)
 
     Console.WriteLine($"✅ Seeded database with {users.Count} users");
 }
+// DTO for music profile update
+public record UpdateMusicProfileRequest(
+    string Artists,
+    string Songs,
+    string Genres
+);
