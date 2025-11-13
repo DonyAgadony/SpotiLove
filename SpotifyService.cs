@@ -182,11 +182,6 @@ public class SpotifyService
             .ToList()
             ?? new List<ArtistInfo>();
     }
-
-    /// <summary>
-    /// Fetches popular artists by reading the artists from a global playlist and fetching their full profiles.
-    /// FIXED: Uses Task.WhenAll to fetch multiple artist profiles concurrently and non-blockingly.
-    /// </summary>
     public async Task<List<ArtistInfo>> GetPopularArtistsAsync(int limit = 20)
     {
         await EnsureClientIsAuthenticatedAsync();
@@ -195,53 +190,97 @@ public class SpotifyService
 
         try
         {
-            // ID for the global "Today's Top Hits" playlist on Spotify
-            const string topHitsPlaylistId = "37i9dQZF1DXcBWIGoYBM5M";
+            // Get featured playlists (more reliable than hardcoded IDs)
+            var featuredPlaylists = await _spotify.Browse.GetFeaturedPlaylists(new FeaturedPlaylistsRequest
+            {
+                Limit = 1,
+                Country = "US"
+            });
 
-            // 1. Fetch the playlist
-            var playlist = await _spotify.Playlists.Get(topHitsPlaylistId);
+            if (featuredPlaylists.Playlists?.Items == null || !featuredPlaylists.Playlists.Items.Any())
+            {
+                Console.WriteLine("No featured playlists found, falling back to search");
+                return await GetPopularArtistsFromSearchAsync(limit);
+            }
 
-            // 2. Extract unique artist IDs
+            var firstPlaylist = featuredPlaylists.Playlists.Items.First();
+            var playlist = await _spotify.Playlists.Get(firstPlaylist.Id!);
+
+            // Extract unique artist IDs
             var artistIds = playlist.Tracks?.Items?
                 .SelectMany(item => item.Track is FullTrack track ? track.Artists : Enumerable.Empty<SimpleArtist>())
                 .Where(artist => artist != null && !string.IsNullOrEmpty(artist.Id))
                 .Select(artist => artist.Id)
                 .Distinct()
-                .Take(limit) // Limit the number of unique IDs we will process
-                .ToList(); // Materialize the list
+                .Take(limit)
+                .ToList();
 
             if (artistIds == null || !artistIds.Any())
             {
-                return new List<ArtistInfo>();
+                return await GetPopularArtistsFromSearchAsync(limit);
             }
 
-            // 3. Create a list of tasks for fetching full artist details
+            // Fetch all artist details concurrently
             var artistTasks = artistIds.Select(id => _spotify.Artists.Get(id)).ToList();
-
-            // 4. Await all tasks concurrently and non-blockingly
             var fullArtists = await Task.WhenAll(artistTasks);
 
-            // 5. Map the resulting FullArtist objects to your ArtistInfo record
             return fullArtists
-                .Where(a => a != null) // Filter out any artists that might have failed to load
+                .Where(a => a != null)
                 .Select(fullArtist => new ArtistInfo(fullArtist.Name, fullArtist.Images.FirstOrDefault()?.Url))
                 .ToList();
         }
         catch (APIException ex)
         {
-            // Catching Spotify API specific errors (e.g., 404 Not Found, 401 Unauthorized, etc.)
             Console.WriteLine($"Spotify API Error in GetPopularArtistsAsync: {ex.Response?.StatusCode} - {ex.Message}");
-            // Return empty list gracefully instead of crashing the API
-            return new List<ArtistInfo>();
+            return await GetPopularArtistsFromSearchAsync(limit);
         }
         catch (Exception ex)
         {
-            // Catching other unexpected exceptions
             Console.WriteLine($"Unexpected Error in GetPopularArtistsAsync: {ex.Message}");
             return new List<ArtistInfo>();
         }
     }
 
+    // Fallback method using search for popular artists
+    private async Task<List<ArtistInfo>> GetPopularArtistsFromSearchAsync(int limit)
+    {
+        try
+        {
+            // Search for some popular genres/terms to get popular artists
+            var popularSearchTerms = new[] { "pop", "hip hop", "rock", "taylor swift", "drake", "bad bunny" };
+            var allArtists = new List<ArtistInfo>();
+            var seenArtists = new HashSet<string>();
+
+            foreach (var term in popularSearchTerms)
+            {
+                if (allArtists.Count >= limit) break;
+
+                var searchRequest = new SearchRequest(SearchRequest.Types.Artist, term) { Limit = 10 };
+                var searchResponse = await _spotify.Search.Item(searchRequest);
+
+                var newArtists = searchResponse.Artists.Items?
+                    .Where(a => !seenArtists.Contains(a.Name))
+                    .Select(a => new ArtistInfo(a.Name, a.Images.FirstOrDefault()?.Url))
+                    .Take(limit - allArtists.Count)
+                    .ToList() ?? new List<ArtistInfo>();
+
+                foreach (var artist in newArtists)
+                {
+                    seenArtists.Add(artist.Name);
+                    allArtists.Add(artist);
+                }
+
+                await Task.Delay(100); // Rate limiting
+            }
+
+            return allArtists.Take(limit).ToList();
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error in fallback search: {ex.Message}");
+            return new List<ArtistInfo>();
+        }
+    }
     //helper function
     private string CreateSlug(string input)
     {
