@@ -8,11 +8,6 @@ namespace Spotilove;
 
 public class GeminiService
 {
-    string filePath;
-    public GeminiService(string filePath)
-    {
-        this.filePath = filePath;
-    }
 
     public static async Task<int?> CalculatePercentage(MusicProfile p1, MusicProfile p2)
     {
@@ -102,10 +97,8 @@ Invalid responses: 78% or '78' or ```78``` or any explanation";
             return null;
         }
     }
-
-    /// <summary>
+        
     /// Extracts a number from text that might contain markdown, code blocks, or other formatting
-    /// </summary>
     private static int? ExtractNumber(string text)
     {
         try
