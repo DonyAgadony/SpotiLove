@@ -165,3 +165,4 @@ C:\Users\User\Desktop\DanielHamelech\SpotiLove\JsonDemo\obj\Debug\net9.0\rjsmcsh
 C:\Users\User\Desktop\DanielHamelech\SpotiLove\JsonDemo\obj\Debug\net9.0\staticwebassets.build.json.cache
 C:\Users\User\Desktop\DanielHamelech\SpotiLove\JsonDemo\bin\Debug\net9.0\Npgsql.dll
 C:\Users\User\Desktop\DanielHamelech\SpotiLove\JsonDemo\bin\Debug\net9.0\Npgsql.EntityFrameworkCore.PostgreSQL.dll
+C:\Users\User\Desktop\DanielHamelech\SpotiLove\JsonDemo\bin\Debug\net9.0\Spotify.dll

@@ -81,6 +81,10 @@
               "target": "Package",
               "version": "[9.0.4, )"
             },
+            "Spotify": {
+              "target": "Package",
+              "version": "[1.0.0, )"
+            },
             "SpotifyAPI.Web": {
               "target": "Package",
               "version": "[7.2.1, )"

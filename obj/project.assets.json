@@ -1122,6 +1122,15 @@
           }
         }
       },
+      "Spotify/1.0.0": {
+        "type": "package",
+        "compile": {
+          "lib/netcoreapp3.1/Spotify.dll": {}
+        },
+        "runtime": {
+          "lib/netcoreapp3.1/Spotify.dll": {}
+        }
+      },
       "SpotifyAPI.Web/7.2.1": {
         "type": "package",
         "dependencies": {
@@ -4908,6 +4917,18 @@
         "runtimes/ubuntu.16.10-x64/native/System.Security.Cryptography.Native.OpenSsl.so"
       ]
     },
+    "Spotify/1.0.0": {
+      "sha512": "OJUjNIXy9jfGC8Ij1d6TZ7PAElUW9dM6p5sjUtCfxRW0dtN8Q3ilAJwlz0qSZACnhUIh0PIYH5P/EOkSDFEjxg==",
+      "type": "package",
+      "path": "spotify/1.0.0",
+      "files": [
+        ".nupkg.metadata",
+        ".signature.p7s",
+        "lib/netcoreapp3.1/Spotify.dll",
+        "spotify.1.0.0.nupkg.sha512",
+        "spotify.nuspec"
+      ]
+    },
     "SpotifyAPI.Web/7.2.1": {
       "sha512": "7yatLKdwPmigJ+GGPUHwZppYzWNIPOSrpA3KKK/kndJl657zm1yzaAQ7j2xy3G7lyiKsdRZtz4k6CpFN32pyng==",
       "type": "package",
@@ -8569,6 +8590,7 @@
       "Microsoft.EntityFrameworkCore.Sqlite >= 9.0.8",
       "Microsoft.EntityFrameworkCore.Tools >= 9.0.8",
       "Npgsql.EntityFrameworkCore.PostgreSQL >= 9.0.4",
+      "Spotify >= 1.0.0",
       "SpotifyAPI.Web >= 7.2.1",
       "SpotifyAPI.Web.Auth >= 7.2.1",
       "Swashbuckle.AspNetCore >= 9.0.4",
@@ -8655,6 +8677,10 @@
           "Npgsql.EntityFrameworkCore.PostgreSQL": {
             "target": "Package",
             "version": "[9.0.4, )"
+          },
+          "Spotify": {
+            "target": "Package",
+            "version": "[1.0.0, )"
           },
           "SpotifyAPI.Web": {
             "target": "Package",

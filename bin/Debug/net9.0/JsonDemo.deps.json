@@ -15,6 +15,7 @@
           "Microsoft.EntityFrameworkCore.Sqlite": "9.0.8",
           "Microsoft.EntityFrameworkCore.Tools": "9.0.8",
           "Npgsql.EntityFrameworkCore.PostgreSQL": "9.0.4",
+          "Spotify": "1.0.0",
           "SpotifyAPI.Web": "7.2.1",
           "SpotifyAPI.Web.Auth": "7.2.1",
           "Swashbuckle.AspNetCore": "9.0.4",
@@ -750,6 +751,14 @@
       "runtime.ubuntu.14.04-x64.runtime.native.System.Security.Cryptography.OpenSsl/4.3.2": {},
       "runtime.ubuntu.16.04-x64.runtime.native.System.Security.Cryptography.OpenSsl/4.3.2": {},
       "runtime.ubuntu.16.10-x64.runtime.native.System.Security.Cryptography.OpenSsl/4.3.2": {},
+      "Spotify/1.0.0": {
+        "runtime": {
+          "lib/netcoreapp3.1/Spotify.dll": {
+            "assemblyVersion": "1.0.0.0",
+            "fileVersion": "1.0.0.0"
+          }
+        }
+      },
       "SpotifyAPI.Web/7.2.1": {
         "dependencies": {
           "Newtonsoft.Json": "13.0.3"
@@ -2062,6 +2071,13 @@
       "sha512": "sha512-leXiwfiIkW7Gmn7cgnNcdtNAU70SjmKW3jxGj1iKHOvdn0zRWsgv/l2OJUO5zdGdiv2VRFnAsxxhDgMzofPdWg==",
       "path": "runtime.ubuntu.16.10-x64.runtime.native.system.security.cryptography.openssl/4.3.2",
       "hashPath": "runtime.ubuntu.16.10-x64.runtime.native.system.security.cryptography.openssl.4.3.2.nupkg.sha512"
+    },
+    "Spotify/1.0.0": {
+      "type": "package",
+      "serviceable": true,
+      "sha512": "sha512-OJUjNIXy9jfGC8Ij1d6TZ7PAElUW9dM6p5sjUtCfxRW0dtN8Q3ilAJwlz0qSZACnhUIh0PIYH5P/EOkSDFEjxg==",
+      "path": "spotify/1.0.0",
+      "hashPath": "spotify.1.0.0.nupkg.sha512"
     },
     "SpotifyAPI.Web/7.2.1": {
       "type": "package",

@@ -1,6 +1,9 @@
 using Microsoft.EntityFrameworkCore;
 using SpotifyAPI.Web;
 using System.Text.Json;
+using System.Linq;
+using System.Collections.Generic;
+using System.Threading.Tasks;
 
 namespace Spotilove;
 
@@ -24,6 +27,9 @@ public class SpotifyService
         _clientSecret = clientSecret;
         _redirectUri = redirectUri;
     }
+
+    // --- AUTHENTICATION & CLIENT INITIALIZATION ---
+
     public string GetLoginUrl()
     {
         var request = new LoginRequest(
@@ -89,18 +95,18 @@ public class SpotifyService
 
         _spotify = new SpotifyClient(response.AccessToken);
     }
+
     // ---------------------------
     // SPOTIFY DATA FETCHING
     // ---------------------------
+
     public async Task<PrivateUser> GetUserProfileAsync()
     {
         if (_spotify == null) throw new Exception("User not connected");
         return await _spotify.UserProfile.Current();
     }
 
-    /// <summary>
     /// Fetches the user's top artists for the short term (last 4 weeks).
-    /// </summary>
     public async Task<List<ArtistInfo>> GetUserTopArtistsWithImagesAsync(int limit = 10)
     {
         if (_spotify == null) throw new Exception("User not connected");
@@ -117,10 +123,7 @@ public class SpotifyService
             ?? new List<ArtistInfo>();
     }
 
-
-    /// <summary>
     /// Fetches the user's top tracks for the short term (last 4 weeks), formatted as "Song by Artist".
-    /// </summary>
     public async Task<List<string>> GetUserTopSongsAsync(int limit = 10)
     {
         if (_spotify == null) throw new Exception("User not connected");
@@ -134,9 +137,7 @@ public class SpotifyService
         return topTracks.Items?.Select(t => $"{t.Name} by {string.Join(", ", t.Artists.Select(a => a.Name))}").ToList() ?? new List<string>();
     }
 
-    /// <summary>
     /// Fetches the genres of the user's top artists, used for compatibility scoring.
-    /// </summary>
     public async Task<List<string>> GetUserTopGenresAsync(int limit = 20)
     {
         if (_spotify == null) throw new Exception("User not connected");
@@ -168,12 +169,6 @@ public class SpotifyService
                      .ToList();
     }
 
-    /// <summary>
-    /// Searches for artists on Spotify.
-    /// </summary>
-    /// <param name="query">The search term.</param>
-    /// <param name="limit">The number of results to return.</param>
-    /// <returns>A list of artists with their name and image.</returns>
     public async Task<List<ArtistInfo>> SearchArtistsAsync(string query, int limit = 10)
     {
         await EnsureClientIsAuthenticatedAsync();
@@ -189,38 +184,65 @@ public class SpotifyService
     }
 
     /// <summary>
-    /// Gets a list of popular artists from Spotify's "Today's Top Hits" playlist.
+    /// Fetches popular artists by reading the artists from a global playlist and fetching their full profiles.
+    /// FIXED: Uses Task.WhenAll to fetch multiple artist profiles concurrently and non-blockingly.
     /// </summary>
-    /// <param name="limit">The number of unique artists to return.</param>
-    /// <returns>A list of popular artists with their name and image.</returns>
     public async Task<List<ArtistInfo>> GetPopularArtistsAsync(int limit = 20)
     {
         await EnsureClientIsAuthenticatedAsync();
-        if (_spotify == null) throw new Exception("Could not authenticate with Spotify");
+        if (_spotify == null)
+            throw new Exception("Could not authenticate with Spotify");
 
-        // ID for the global "Today's Top Hits" playlist on Spotify
-        const string topHitsPlaylistId = "37i9dQZF1DXcBWIGoYBM5M";
+        try
+        {
+            // ID for the global "Today's Top Hits" playlist on Spotify
+            const string topHitsPlaylistId = "37i9dQZF1DXcBWIGoYBM5M";
 
-        var playlist = await _spotify.Playlists.Get(topHitsPlaylistId);
+            // 1. Fetch the playlist
+            var playlist = await _spotify.Playlists.Get(topHitsPlaylistId);
 
-        var artists = playlist.Tracks?.Items?
-            .SelectMany(item => item.Track is FullTrack track ? track.Artists : Enumerable.Empty<SimpleArtist>())
-            .Where(artist => artist != null)
-            .Select(artist => artist.Id) // Use ID for distinctness
-            .Distinct()
-            .Take(limit) // Take the first 'limit' unique artists
-            .Select(async artistId => await _spotify.Artists.Get(artistId)) // Fetch full artist details
-            .Select(task => task.Result) // Await the tasks
-            .Select(fullArtist => new ArtistInfo(fullArtist.Name, fullArtist.Images.FirstOrDefault()?.Url));
+            // 2. Extract unique artist IDs
+            var artistIds = playlist.Tracks?.Items?
+                .SelectMany(item => item.Track is FullTrack track ? track.Artists : Enumerable.Empty<SimpleArtist>())
+                .Where(artist => artist != null && !string.IsNullOrEmpty(artist.Id))
+                .Select(artist => artist.Id)
+                .Distinct()
+                .Take(limit) // Limit the number of unique IDs we will process
+                .ToList(); // Materialize the list
 
-        return artists?.ToList() ?? new List<ArtistInfo>();
+            if (artistIds == null || !artistIds.Any())
+            {
+                return new List<ArtistInfo>();
+            }
+
+            // 3. Create a list of tasks for fetching full artist details
+            var artistTasks = artistIds.Select(id => _spotify.Artists.Get(id)).ToList();
+
+            // 4. Await all tasks concurrently and non-blockingly
+            var fullArtists = await Task.WhenAll(artistTasks);
+
+            // 5. Map the resulting FullArtist objects to your ArtistInfo record
+            return fullArtists
+                .Where(a => a != null) // Filter out any artists that might have failed to load
+                .Select(fullArtist => new ArtistInfo(fullArtist.Name, fullArtist.Images.FirstOrDefault()?.Url))
+                .ToList();
+        }
+        catch (APIException ex)
+        {
+            // Catching Spotify API specific errors (e.g., 404 Not Found, 401 Unauthorized, etc.)
+            Console.WriteLine($"Spotify API Error in GetPopularArtistsAsync: {ex.Response?.StatusCode} - {ex.Message}");
+            // Return empty list gracefully instead of crashing the API
+            return new List<ArtistInfo>();
+        }
+        catch (Exception ex)
+        {
+            // Catching other unexpected exceptions
+            Console.WriteLine($"Unexpected Error in GetPopularArtistsAsync: {ex.Message}");
+            return new List<ArtistInfo>();
+        }
     }
-    // ---------------------------
-    // HELPER METHODS FOR SLUG GENERATION
-    // ---------------------------
-    /// <summary>
-    /// Creates a URL-friendly slug from a song and artist name.
-    /// </summary>
+
+    //helper function
     private string CreateSlug(string input)
     {
         // Simple slugification, removing common punctuation and replacing spaces with hyphens.
@@ -256,6 +278,7 @@ public class SpotifyService
     // ---------------------------
     // SAVE TO DB (Integration with AppDbContext)
     // ---------------------------
+
     /// <summary>
     /// Fetches all top data from Spotify and updates the local User and MusicProfile entities.
     /// </summary>
@@ -312,6 +335,7 @@ public class SpotifyService
         await db.SaveChangesAsync();
         return user;
     }
+
     public async Task<List<SpotifySongDto>> GetArtistTopTracksAsync(string artistName, int limit = 10)
     {
         await EnsureClientIsAuthenticatedAsync();

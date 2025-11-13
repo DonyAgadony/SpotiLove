@@ -291,11 +291,6 @@ app.MapPost("/users/{userId:int}/profile", async (
 })
 .WithName("UpdateUserMusicProfile")
 .WithSummary("Update user's music profile with artists, songs, and genres");
-// ===========================================================
-// (Keep the rest of your endpoints exactly as-is below this)
-// ===========================================================
-
-// ... keep all your other /users, /music-profile, /auth, /swipe, etc. endpoints ...
 
 Console.WriteLine("🎯 Spotilove API is starting...");
 Console.WriteLine($"🌐 Running on port: {port}");
