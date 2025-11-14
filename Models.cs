@@ -1,16 +1,10 @@
 using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
 using System.Text.Json.Serialization;
-using System.Collections.Generic;
-using System;
-using System.Linq;
-using Microsoft.EntityFrameworkCore; // Required for LINQ usage in DtoMappers
-
+using Microsoft.EntityFrameworkCore;
 namespace Spotilove;
 
-// =======================================================
 // ============ DATABASE ENTITIES (MODELS) ===============
-// =======================================================
 public class User
 {
     // Primary Key
@@ -66,9 +60,7 @@ public class User
     public List<UserSuggestionQueue> Suggestions { get; set; } = new();
 }
 
-/// <summary>
 /// Stores music-related preferences for a User (1-1 relationship).
-/// </summary>
 public class MusicProfile
 {
     // Primary Key (often same as UserId for a 1:1 relationship)
@@ -93,34 +85,37 @@ public class MusicProfile
     public User? User { get; set; }
 }
 
-/// <summary>
-/// Represents a URL for a user's profile picture (1-Many relationship).
-/// </summary>
 public class UserImage
 {
+    // Primary Key (Inherited from both)
     [Key]
     public int Id { get; set; }
 
+    // Foreign Key to User (Inherited from both, with Required annotation added)
     [Required]
     public int UserId { get; set; }
 
+    // Core Image Data (Uses ImageUrl from the second snippet as the source of truth)
     [Required, MaxLength(2048)]
-    // FIX: Renamed 'Url' back to 'ImageUrl' to resolve external CS1061 errors
     public string ImageUrl { get; set; } = string.Empty;
 
-    // Provides 'Url' as a simple alias for backwards compatibility in external code
+    // [NotMapped] ensures EF Core doesn't try to save this to the database.
     [NotMapped]
-    public string Url { get => ImageUrl; set => ImageUrl = value; }
+    public string Url
+    {
+        get => ImageUrl;
+        set => ImageUrl = value;
+    }
 
-    // Navigation Property
+    // [JsonIgnore] prevents this property from being included in JSON output
+    // when serializing the UserImage object, preventing circular references.
     [JsonIgnore]
     public User? User { get; set; }
 }
 
-/// <summary>
 /// Represents a swipe/like action between two users (Many-to-Many relationship).
 /// Uses a composite key (FromUserId, ToUserId).
-/// </summary>
+
 public class Like
 {
     // Composite Key Part 1: The user who initiated the swipe
@@ -147,10 +142,10 @@ public class Like
     public User ToUser { get; set; } = null!;
 }
 
-/// <summary>
+
 /// Represents a user suggested as a potential match, stored in a queue.
 /// Uses a composite key (UserId, SuggestedUserId).
-/// </summary>
+
 public class UserSuggestionQueue
 {
     // Composite Key Part 1: The ID of the user whose queue this item belongs to
@@ -241,7 +236,9 @@ public record CreateUserDto(
     string Password,
     string Genres,
     string Artists,
-    string Songs = "");
+    string? ProfileImage = null,
+    string Songs = ""
+);
 
 // Changed to nullable strings for partial updates
 public record UpdateProfileDto(string? Genres, string? Artists, string? Songs);
@@ -265,9 +262,9 @@ public class ResponseMessage
 // =======================================================
 public static class DtoMappers
 {
-    /// <summary>
+    
     /// Helper to convert User entity to UserDto
-    /// </summary>
+    
     public static UserDto ToUserDto(User user)
     {
         return new UserDto
@@ -292,9 +289,9 @@ public static class DtoMappers
 }
 public static class Endpoints
 {
-    /// <summary>
+    
     /// Creates a new user with an initial music profile.
-    /// </summary>
+    
     public static async Task<IResult> CreateUser(AppDbContext db, CreateUserDto dto)
     {
         var user = new User
@@ -326,9 +323,9 @@ public static class Endpoints
         });
     }
 
-    /// <summary>
+    
     /// Gets a user profile by ID.
-    /// </summary>
+    
     public static async Task<IResult> GetUser(AppDbContext db, int id)
     {
         var user = await db.Users
@@ -341,9 +338,9 @@ public static class Endpoints
         return Results.Ok(user); // Returning the full entity for simplicity
     }
 
-    /// <summary>
+    
     /// Updates only the music profile fields.
-    /// </summary>
+    
     public static async Task<IResult> UpdateProfile(AppDbContext db, int id, UpdateProfileDto dto)
     {
         var user = await db.Users
@@ -361,9 +358,9 @@ public static class Endpoints
         return Results.Ok(user);
     }
 
-    /// <summary>
+    
     /// Returns a list of all users.
-    /// </summary>
+    
     public static async Task<IResult> SearchUsers(AppDbContext db)
     {
         var users = await db.Users
@@ -375,9 +372,9 @@ public static class Endpoints
         return Results.Ok(users);
     }
 
-    /// <summary>
+    
     /// Adds a new image URL to a user's profile.
-    /// </summary>
+    
     public static async Task<IResult> AddUserImage(AppDbContext db, int id, UserImage image)
     {
         var user = await db.Users.FirstOrDefaultAsync(u => u.Id == id);
@@ -396,9 +393,9 @@ public static class Endpoints
         return Results.Ok(image);
     }
 
-    /// <summary>
+    
     /// Gets all images for a specific user.
-    /// </summary>
+    
     public static async Task<IResult> GetUserImages(AppDbContext db, int id)
     {
         var user = await db.Users

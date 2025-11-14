@@ -401,7 +401,8 @@ public class SpotifyService
                 .Select(track => new SpotifySongDto
                 {
                     Title = track.Name,
-                    Artist = string.Join(", ", track.Artists.Select(a => a.Name))
+                    Artist = string.Join(", ", track.Artists.Select(a => a.Name)),
+                    PreviewUrl = track.PreviewUrl // ✅ Added preview URL
                 })
                 .ToList();
         }
@@ -411,7 +412,6 @@ public class SpotifyService
             return new List<SpotifySongDto>();
         }
     }
-
     /// <summary>
     /// Gets genres from a list of artist names.
     /// </summary>
@@ -464,5 +464,6 @@ public class SpotifyService
     {
         public string Title { get; set; } = "";
         public string Artist { get; set; } = "";
+        public string? PreviewUrl { get; set; }
     }
 }
