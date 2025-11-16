@@ -382,6 +382,8 @@ public class SpotifyService
 
         try
         {
+            Console.WriteLine($"🔍 Searching for artist: {artistName}");
+
             // First, search for the artist
             var searchRequest = new SearchRequest(SearchRequest.Types.Artist, artistName) { Limit = 1 };
             var searchResponse = await _spotify.Search.Item(searchRequest);
@@ -389,32 +391,42 @@ public class SpotifyService
             var artist = searchResponse.Artists.Items?.FirstOrDefault();
             if (artist == null)
             {
-                Console.WriteLine($"Artist '{artistName}' not found");
+                Console.WriteLine($"❌ Artist '{artistName}' not found");
                 return new List<SpotifySongDto>();
             }
+
+            Console.WriteLine($"✅ Found artist: {artist.Name} (ID: {artist.Id})");
 
             // Get the artist's top tracks
             var topTracks = await _spotify.Artists.GetTopTracks(artist.Id, new ArtistsTopTracksRequest("US"));
 
-            return topTracks.Tracks
+            Console.WriteLine($"📀 Retrieved {topTracks.Tracks.Count} tracks");
+
+            var result = topTracks.Tracks
                 .Take(limit)
-                .Select(track => new SpotifySongDto
+                .Select(track =>
                 {
-                    Title = track.Name,
-                    Artist = string.Join(", ", track.Artists.Select(a => a.Name)),
-                    PreviewUrl = track.PreviewUrl // ✅ Added preview URL
+                    var previewUrl = track.PreviewUrl;
+                    Console.WriteLine($"   Track: {track.Name} | Preview: {(previewUrl != null ? previewUrl : "NOT AVAILABLE")}");
+
+                    return new SpotifySongDto
+                    {
+                        Title = track.Name,
+                        Artist = string.Join(", ", track.Artists.Select(a => a.Name)),
+                        PreviewUrl = previewUrl
+                    };
                 })
                 .ToList();
+
+            return result;
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"Error getting tracks for artist '{artistName}': {ex.Message}");
+            Console.WriteLine($"❌ Error getting tracks for artist '{artistName}': {ex.Message}");
             return new List<SpotifySongDto>();
         }
     }
-    /// <summary>
     /// Gets genres from a list of artist names.
-    /// </summary>
     public async Task<List<string>> GetGenresFromArtistsAsync(List<string> artistNames)
     {
         await EnsureClientIsAuthenticatedAsync();
