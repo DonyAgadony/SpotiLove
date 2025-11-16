@@ -209,36 +209,6 @@ app.MapGet("/spotify/debug-search-artist", async (
 .WithName("DebugSearchArtist")
 .WithSummary("Debug: Search for an artist and see all results");
 
-app.MapGet("/spotify/artist-top-tracks", async (
-    SpotifyService spotifyService,
-    string artistName,
-    int limit = 10) =>
-{
-    try
-    {
-        if (string.IsNullOrWhiteSpace(artistName))
-            return Results.BadRequest(new { success = false, message = "Artist name is required" });
-
-        Console.WriteLine($"🎵 Fetching tracks for artist: {artistName}");
-        var tracks = await spotifyService.GetArtistTopTracksAsync(artistName, limit);
-
-        Console.WriteLine($"✅ Found {tracks.Count} tracks");
-        foreach (var track in tracks)
-        {
-            Console.WriteLine($"   - {track.Title} | Preview: {(track.PreviewUrl != null ? "✓" : "✗")}");
-        }
-
-        return Results.Ok(tracks);
-    }
-    catch (Exception ex)
-    {
-        Console.WriteLine($"❌ Error fetching artist tracks: {ex.Message}");
-        return Results.Problem(detail: ex.Message, title: "Failed to fetch artist tracks");
-    }
-})
-.WithName("GetArtistTopTracks")
-.WithSummary("Get top tracks from a specific artist with preview URLs");
-
 // Get top tracks from an artist
 app.MapGet("/spotify/artist-top-tracks"!, async (
     SpotifyService spotifyService,
