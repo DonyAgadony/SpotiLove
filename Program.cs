@@ -163,15 +163,26 @@ app.MapGet("/spotify/search-artists", async (SpotifyService spotifyService, stri
 .WithName("SearchArtists")
 .WithSummary("Search for artists on Spotify");
 
-// Get top tracks from a specific artist
-app.MapGet("/spotify/artist-top-tracks", async (SpotifyService spotifyService, string artistName, int limit = 10) =>
+// Get top tracks from an artist
+app.MapGet("/spotify/artist-top-tracks", async (
+    SpotifyService spotifyService,
+    string artistName,
+    int limit = 10) =>
 {
     try
     {
         if (string.IsNullOrWhiteSpace(artistName))
-            return Results.BadRequest("Artist name is required");
+            return Results.BadRequest(new { success = false, message = "Artist name is required" });
 
+        Console.WriteLine($"🎵 Fetching tracks for artist: {artistName}");
         var tracks = await spotifyService.GetArtistTopTracksAsync(artistName, limit);
+
+        Console.WriteLine($"✅ Found {tracks.Count} tracks");
+        foreach (var track in tracks)
+        {
+            Console.WriteLine($"   - {track.Title} | Preview: {(track.PreviewUrl != null ? "✓" : "✗")}");
+        }
+
         return Results.Ok(tracks);
     }
     catch (Exception ex)
@@ -181,7 +192,7 @@ app.MapGet("/spotify/artist-top-tracks", async (SpotifyService spotifyService, s
     }
 })
 .WithName("GetArtistTopTracks")
-.WithSummary("Get top tracks from a specific artist");
+.WithSummary("Get top tracks from a specific artist with preview URLs");
 
 // Get genres from selected artists
 app.MapGet("/spotify/genres-from-artists", async (SpotifyService spotifyService, string artists) =>
