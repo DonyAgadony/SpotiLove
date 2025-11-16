@@ -375,6 +375,7 @@ public class SpotifyService
         return user;
     }
 
+
     public async Task<List<SpotifySongDto>> GetArtistTopTracksAsync(string artistName, int limit = 10)
     {
         await EnsureClientIsAuthenticatedAsync();
@@ -384,30 +385,85 @@ public class SpotifyService
         {
             Console.WriteLine($"🔍 Searching for artist: {artistName}");
 
-            // First, search for the artist
-            var searchRequest = new SearchRequest(SearchRequest.Types.Artist, artistName) { Limit = 1 };
+            // Search for multiple results to find the most popular one
+            var searchRequest = new SearchRequest(SearchRequest.Types.Artist, artistName) { Limit = 5 };
             var searchResponse = await _spotify.Search.Item(searchRequest);
 
-            var artist = searchResponse.Artists.Items?.FirstOrDefault();
-            if (artist == null)
+            if (searchResponse.Artists.Items == null || !searchResponse.Artists.Items.Any())
             {
                 Console.WriteLine($"❌ Artist '{artistName}' not found");
                 return new List<SpotifySongDto>();
             }
 
-            Console.WriteLine($"✅ Found artist: {artist.Name} (ID: {artist.Id})");
+            // Find the most popular artist with a matching name (case-insensitive)
+            var artist = searchResponse.Artists.Items
+                .Where(a => a.Name.Equals(artistName, StringComparison.OrdinalIgnoreCase))
+                .OrderByDescending(a => a.Popularity)
+                .ThenByDescending(a => a.Followers.Total)
+                .FirstOrDefault();
 
-            // Get the artist's top tracks
-            var topTracks = await _spotify.Artists.GetTopTracks(artist.Id, new ArtistsTopTracksRequest("US"));
+            // If no exact match, take the most popular result
+            if (artist == null)
+            {
+                artist = searchResponse.Artists.Items
+                    .OrderByDescending(a => a.Popularity)
+                    .ThenByDescending(a => a.Followers.Total)
+                    .FirstOrDefault();
+            }
 
-            Console.WriteLine($"📀 Retrieved {topTracks.Tracks.Count} tracks");
+            if (artist == null)
+            {
+                Console.WriteLine($"❌ Could not find valid artist for '{artistName}'");
+                return new List<SpotifySongDto>();
+            }
 
-            var result = topTracks.Tracks
+            Console.WriteLine($"✅ Found artist: {artist.Name} (ID: {artist.Id}, Popularity: {artist.Popularity}, Followers: {artist.Followers.Total:N0})");
+
+            Console.WriteLine($"✅ Found artist: {artist.Name} (ID: {artist.Id}, Popularity: {artist.Popularity}, Followers: {artist.Followers.Total:N0})");
+
+            // Try multiple markets to get tracks with previews
+            var markets = new[] { "US", "GB", "CA", "AU" };
+            List<FullTrack> allTracks = new();
+
+            foreach (var market in markets)
+            {
+                try
+                {
+                    var tracksResponse = await _spotify.Artists.GetTopTracks(artist.Id, new ArtistsTopTracksRequest(market));
+                    if (tracksResponse.Tracks != null && tracksResponse.Tracks.Any())
+                    {
+                        allTracks.AddRange(tracksResponse.Tracks);
+                        Console.WriteLine($"📀 Found {tracksResponse.Tracks.Count} tracks from {market} market");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"⚠️ Failed to get tracks from {market}: {ex.Message}");
+                }
+            }
+
+            if (!allTracks.Any())
+            {
+                Console.WriteLine($"❌ No tracks found for artist {artist.Name}");
+                return new List<SpotifySongDto>();
+            }
+
+            // Deduplicate tracks by ID and prioritize those with previews
+            var uniqueTracks = allTracks
+                .GroupBy(t => t.Id)
+                .Select(g => g.OrderByDescending(t => t.PreviewUrl != null).First())
+                .OrderByDescending(t => t.Popularity)
+                .ThenByDescending(t => t.PreviewUrl != null)
                 .Take(limit)
+                .ToList();
+
+            Console.WriteLine($"📀 Retrieved {uniqueTracks.Count} unique tracks");
+
+            var result = uniqueTracks
                 .Select(track =>
                 {
                     var previewUrl = track.PreviewUrl;
-                    Console.WriteLine($"   Track: {track.Name} | Preview: {(previewUrl != null ? previewUrl : "NOT AVAILABLE")}");
+                    Console.WriteLine($"   Track: {track.Name} | Popularity: {track.Popularity} | Preview: {(previewUrl != null ? "✓" : "✗")}");
 
                     return new SpotifySongDto
                     {
@@ -418,6 +474,9 @@ public class SpotifyService
                 })
                 .ToList();
 
+            var previewCount = result.Count(r => r.PreviewUrl != null);
+            Console.WriteLine($"✅ Returning {result.Count} tracks ({previewCount} with previews)");
+
             return result;
         }
         catch (Exception ex)
@@ -426,6 +485,7 @@ public class SpotifyService
             return new List<SpotifySongDto>();
         }
     }
+
     /// Gets genres from a list of artist names.
     public async Task<List<string>> GetGenresFromArtistsAsync(List<string> artistNames)
     {
