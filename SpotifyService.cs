@@ -256,7 +256,7 @@ public class SpotifyService
                 if (allArtists.Count >= limit) break;
 
                 var searchRequest = new SearchRequest(SearchRequest.Types.Artist, term) { Limit = 10 };
-                var searchResponse = await _spotify.Search.Item(searchRequest);
+                var searchResponse = await _spotify!.Search.Item(searchRequest);
 
                 var newArtists = searchResponse.Artists.Items?
                     .Where(a => !seenArtists.Contains(a.Name))

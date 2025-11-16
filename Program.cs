@@ -240,7 +240,7 @@ app.MapGet("/spotify/artist-top-tracks", async (
 .WithSummary("Get top tracks from a specific artist with preview URLs");
 
 // Get top tracks from an artist
-app.MapGet("/spotify/artist-top-tracks", async (
+app.MapGet("/spotify/artist-top-tracks"!, async (
     SpotifyService spotifyService,
     string artistName,
     int limit = 10) =>
