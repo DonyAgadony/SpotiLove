@@ -163,6 +163,82 @@ app.MapGet("/spotify/search-artists", async (SpotifyService spotifyService, stri
 .WithName("SearchArtists")
 .WithSummary("Search for artists on Spotify");
 
+app.MapGet("/spotify/debug-search-artist", async (
+    SpotifyService spotifyService,
+    string artistName) =>
+{
+    try
+    {
+        await spotifyService.EnsureClientIsAuthenticatedAsync();
+        var spotify = spotifyService.GetSpotifyClient();
+
+        if (spotify == null)
+            return Results.Problem("Could not authenticate");
+
+        var searchRequest = new SpotifyAPI.Web.SearchRequest(
+            SpotifyAPI.Web.SearchRequest.Types.Artist,
+            artistName)
+        {
+            Limit = 10
+        };
+
+        var searchResponse = await spotify.Search.Item(searchRequest);
+
+        var results = searchResponse.Artists.Items?.Select(a => new
+        {
+            name = a.Name,
+            id = a.Id,
+            popularity = a.Popularity,
+            followers = a.Followers.Total,
+            genres = a.Genres,
+            url = $"https://open.spotify.com/artist/{a.Id}"
+        }).ToList();
+
+        return Results.Ok(new
+        {
+            query = artistName,
+            resultsCount = results?.Count ?? 0,
+            artists = results
+        });
+    }
+    catch (Exception ex)
+    {
+        return Results.Problem(detail: ex.Message, title: "Debug search failed");
+    }
+})
+.WithName("DebugSearchArtist")
+.WithSummary("Debug: Search for an artist and see all results");
+
+app.MapGet("/spotify/artist-top-tracks", async (
+    SpotifyService spotifyService,
+    string artistName,
+    int limit = 10) =>
+{
+    try
+    {
+        if (string.IsNullOrWhiteSpace(artistName))
+            return Results.BadRequest(new { success = false, message = "Artist name is required" });
+
+        Console.WriteLine($"🎵 Fetching tracks for artist: {artistName}");
+        var tracks = await spotifyService.GetArtistTopTracksAsync(artistName, limit);
+
+        Console.WriteLine($"✅ Found {tracks.Count} tracks");
+        foreach (var track in tracks)
+        {
+            Console.WriteLine($"   - {track.Title} | Preview: {(track.PreviewUrl != null ? "✓" : "✗")}");
+        }
+
+        return Results.Ok(tracks);
+    }
+    catch (Exception ex)
+    {
+        Console.WriteLine($"❌ Error fetching artist tracks: {ex.Message}");
+        return Results.Problem(detail: ex.Message, title: "Failed to fetch artist tracks");
+    }
+})
+.WithName("GetArtistTopTracks")
+.WithSummary("Get top tracks from a specific artist with preview URLs");
+
 // Get top tracks from an artist
 app.MapGet("/spotify/artist-top-tracks", async (
     SpotifyService spotifyService,
@@ -1178,7 +1254,7 @@ Console.WriteLine("⚙️  Make sure to set GeminiAPIKey environment variable fo
 Console.WriteLine("🧪 Test endpoints available:");
 Console.WriteLine("   - POST /fix-user101");
 Console.WriteLine("   - POST /seed-database");
-Console.WriteLine($"📖 View API documentation at: http://0.0.0.0:{port}/swagger");
+Console.WriteLine($"📖 View API documentation at: http://localhost:{port}/swagger");
 
 app.Run();
 
