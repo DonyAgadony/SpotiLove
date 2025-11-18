@@ -241,6 +241,174 @@ public class SpotifyService
         }
     }
 
+    public async Task<List<SpotifySongDto>> GetArtistTopTracksAsync(string artistName, int limit = 10)
+    {
+        await EnsureClientIsAuthenticatedAsync();
+        if (_spotify == null) throw new Exception("Could not authenticate with Spotify");
+
+        try
+        {
+            Console.WriteLine($"🔍 Searching for artist: {artistName}");
+
+            var searchRequest = new SearchRequest(SearchRequest.Types.Artist, artistName) { Limit = 10 };
+            var searchResponse = await _spotify.Search.Item(searchRequest);
+
+            if (searchResponse.Artists.Items == null || !searchResponse.Artists.Items.Any())
+            {
+                Console.WriteLine($"❌ Artist '{artistName}' not found");
+                return new List<SpotifySongDto>();
+            }
+
+            var artist = searchResponse.Artists.Items
+                .Where(a => a.Name.Equals(artistName, StringComparison.OrdinalIgnoreCase) && a.Popularity >= 80)
+                .OrderByDescending(a => a.Popularity)
+                .ThenByDescending(a => a.Followers.Total)
+                .FirstOrDefault();
+
+            if (artist == null)
+            {
+                artist = searchResponse.Artists.Items
+                    .OrderByDescending(a => a.Popularity)
+                    .ThenByDescending(a => a.Followers.Total)
+                    .FirstOrDefault();
+            }
+
+            if (artist == null)
+            {
+                Console.WriteLine($"❌ Could not find valid artist for '{artistName}'");
+                return new List<SpotifySongDto>();
+            }
+
+            Console.WriteLine($"✅ Found artist: {artist.Name} (ID: {artist.Id})");
+
+            var topTracksResponse = await _spotify.Artists.GetTopTracks(artist.Id, new ArtistsTopTracksRequest("US"));
+
+            if (topTracksResponse.Tracks == null || !topTracksResponse.Tracks.Any())
+            {
+                return new List<SpotifySongDto>();
+            }
+
+            var result = new List<SpotifySongDto>();
+
+            foreach (var track in topTracksResponse.Tracks.Take(limit))
+            {
+                string? spotifyPreviewUrl = track.PreviewUrl;
+
+                // Try to find Spotify preview if missing
+                if (string.IsNullOrEmpty(spotifyPreviewUrl))
+                {
+                    try
+                    {
+                        var trackSearch = new SearchRequest(SearchRequest.Types.Track, $"{track.Name} {artist.Name}")
+                        {
+                            Limit = 5
+                        };
+                        var trackResults = await _spotify.Search.Item(trackSearch);
+
+                        var matchWithPreview = trackResults.Tracks?.Items?
+                            .FirstOrDefault(t =>
+                                t.Name.Equals(track.Name, StringComparison.OrdinalIgnoreCase) &&
+                                !string.IsNullOrEmpty(t.PreviewUrl));
+
+                        if (matchWithPreview != null)
+                        {
+                            spotifyPreviewUrl = matchWithPreview.PreviewUrl;
+                            Console.WriteLine($"   ✅ Found Spotify preview via search: {track.Name}");
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine($"   ⚠️ Spotify track search failed: {ex.Message}");
+                    }
+                }
+
+                // 🎵 Try to get Deezer preview URL
+                string? deezerPreviewUrl = await GetDeezerPreviewUrlAsync(track.Name, artist.Name);
+
+                result.Add(new SpotifySongDto
+                {
+                    Title = track.Name,
+                    Artist = string.Join(", ", track.Artists.Select(a => a.Name)),
+                    PreviewUrl = spotifyPreviewUrl,
+                    DeezerPreviewUrl = deezerPreviewUrl,
+                    SpotifyUri = track.Uri,
+                    SpotifyUrl = track.ExternalUrls.ContainsKey("spotify") ? track.ExternalUrls["spotify"] : null
+                });
+
+                var previewStatus = spotifyPreviewUrl != null ? "Spotify✓" :
+                                    deezerPreviewUrl != null ? "Deezer✓" : "None";
+                Console.WriteLine($"   Track: {track.Name} | Preview: {previewStatus}");
+            }
+
+            var spotifyPreviews = result.Count(r => r.PreviewUrl != null);
+            var deezerPreviews = result.Count(r => r.DeezerPreviewUrl != null);
+            Console.WriteLine($"✅ Returning {result.Count} tracks (Spotify: {spotifyPreviews}, Deezer: {deezerPreviews})");
+
+            return result;
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"❌ Error: {ex.Message}");
+            return new List<SpotifySongDto>();
+        }
+    }
+    /// Searches Deezer for a track and returns its preview URL
+    private async Task<string?> GetDeezerPreviewUrlAsync(string trackName, string artistName)
+    {
+        try
+        {
+            using var httpClient = new HttpClient();
+            httpClient.Timeout = TimeSpan.FromSeconds(5);
+
+            var query = Uri.EscapeDataString($"{trackName} {artistName}");
+            var deezerUrl = $"https://api.deezer.com/search?q={query}&limit=5";
+
+            var response = await httpClient.GetAsync(deezerUrl);
+            if (!response.IsSuccessStatusCode)
+            {
+                return null;
+            }
+
+            var json = await response.Content.ReadAsStringAsync();
+            using var doc = JsonDocument.Parse(json);
+
+            var data = doc.RootElement.GetProperty("data");
+            if (data.GetArrayLength() == 0)
+            {
+                return null;
+            }
+
+            // Find best match
+            foreach (var item in data.EnumerateArray())
+            {
+                var title = item.GetProperty("title").GetString() ?? "";
+                var artist = item.GetProperty("artist").GetProperty("name").GetString() ?? "";
+
+                // Check if it's a good match
+                if (title.Contains(trackName, StringComparison.OrdinalIgnoreCase) ||
+                    trackName.Contains(title, StringComparison.OrdinalIgnoreCase))
+                {
+                    if (item.TryGetProperty("preview", out var previewElement))
+                    {
+                        var previewUrl = previewElement.GetString();
+                        if (!string.IsNullOrEmpty(previewUrl))
+                        {
+                            Console.WriteLine($"   ✅ Found Deezer preview: {trackName}");
+                            return previewUrl;
+                        }
+                    }
+                }
+            }
+
+            return null;
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"   ⚠️ Deezer search failed for '{trackName}': {ex.Message}");
+            return null;
+        }
+    }
+
     // Fallback method using search for popular artists
     private async Task<List<ArtistInfo>> GetPopularArtistsFromSearchAsync(int limit)
     {
@@ -367,114 +535,6 @@ public class SpotifyService
         return user;
     }
 
-
-    public async Task<List<SpotifySongDto>> GetArtistTopTracksAsync(string artistName, int limit = 10)
-    {
-        await EnsureClientIsAuthenticatedAsync();
-        if (_spotify == null) throw new Exception("Could not authenticate with Spotify");
-
-        try
-        {
-            Console.WriteLine($"🔍 Searching for artist: {artistName}");
-
-            var searchRequest = new SearchRequest(SearchRequest.Types.Artist, artistName) { Limit = 10 };
-            var searchResponse = await _spotify.Search.Item(searchRequest);
-
-            if (searchResponse.Artists.Items == null || !searchResponse.Artists.Items.Any())
-            {
-                Console.WriteLine($"❌ Artist '{artistName}' not found");
-                return new List<SpotifySongDto>();
-            }
-
-            var artist = searchResponse.Artists.Items
-                .Where(a => a.Name.Equals(artistName, StringComparison.OrdinalIgnoreCase) && a.Popularity >= 80)
-                .OrderByDescending(a => a.Popularity)
-                .ThenByDescending(a => a.Followers.Total)
-                .FirstOrDefault();
-
-            if (artist == null)
-            {
-                artist = searchResponse.Artists.Items
-                    .OrderByDescending(a => a.Popularity)
-                    .ThenByDescending(a => a.Followers.Total)
-                    .FirstOrDefault();
-            }
-
-            if (artist == null)
-            {
-                Console.WriteLine($"❌ Could not find valid artist for '{artistName}'");
-                return new List<SpotifySongDto>();
-            }
-
-            Console.WriteLine($"✅ Found artist: {artist.Name} (ID: {artist.Id})");
-
-            // STRATEGY 1: Try searching for individual tracks by name
-            // This often returns preview URLs when top tracks don't
-            var topTracksResponse = await _spotify.Artists.GetTopTracks(artist.Id, new ArtistsTopTracksRequest("US"));
-
-            if (topTracksResponse.Tracks == null || !topTracksResponse.Tracks.Any())
-            {
-                return new List<SpotifySongDto>();
-            }
-
-            var result = new List<SpotifySongDto>();
-
-            foreach (var track in topTracksResponse.Tracks.Take(limit))
-            {
-                string? previewUrl = track.PreviewUrl;
-
-                // STRATEGY 2: If no preview, search for the track explicitly
-                if (string.IsNullOrEmpty(previewUrl))
-                {
-                    try
-                    {
-                        var trackSearch = new SearchRequest(SearchRequest.Types.Track, $"{track.Name} {artist.Name}")
-                        {
-                            Limit = 5
-                        };
-                        var trackResults = await _spotify.Search.Item(trackSearch);
-
-                        // Find exact match with preview
-                        var matchWithPreview = trackResults.Tracks?.Items?
-                            .FirstOrDefault(t =>
-                                t.Name.Equals(track.Name, StringComparison.OrdinalIgnoreCase) &&
-                                !string.IsNullOrEmpty(t.PreviewUrl));
-
-                        if (matchWithPreview != null)
-                        {
-                            previewUrl = matchWithPreview.PreviewUrl;
-                            Console.WriteLine($"   ✅ Found preview via search: {track.Name}");
-                        }
-                    }
-                    catch (Exception ex)
-                    {
-                        Console.WriteLine($"   ⚠️ Track search failed: {ex.Message}");
-                    }
-                }
-
-                result.Add(new SpotifySongDto
-                {
-                    Title = track.Name,
-                    Artist = string.Join(", ", track.Artists.Select(a => a.Name)),
-                    PreviewUrl = previewUrl,
-                    SpotifyUri = track.Uri, // For opening in Spotify app
-                    SpotifyUrl = track.ExternalUrls.ContainsKey("spotify") ? track.ExternalUrls["spotify"] : null
-                });
-
-                Console.WriteLine($"   Track: {track.Name} | Preview: {(previewUrl != null ? "✓" : "✗")}");
-            }
-
-            var previewCount = result.Count(r => r.PreviewUrl != null);
-            Console.WriteLine($"✅ Returning {result.Count} tracks ({previewCount} with previews)");
-
-            return result;
-        }
-        catch (Exception ex)
-        {
-            Console.WriteLine($"❌ Error: {ex.Message}");
-            return new List<SpotifySongDto>();
-        }
-    }
     /// Gets genres from a list of artist names.
     public async Task<List<string>> GetGenresFromArtistsAsync(List<string> artistNames)
     {
@@ -528,5 +588,7 @@ public class SpotifyService
         public string? PreviewUrl { get; set; }
         public string? SpotifyUri { get; set; }
         public string? SpotifyUrl { get; set; }
+        public string? DeezerPreviewUrl { get; set; }
+
     }
 }
