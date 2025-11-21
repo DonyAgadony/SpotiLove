@@ -507,7 +507,7 @@ app.MapGet("/users", async (AppDbContext db, [FromQuery] int? userId, [FromQuery
             });
         }
 
-        // 5️⃣ Fetch user details
+        // 5️⃣ Fetch user details and FILTER users without MusicProfile
         var users = await db.Users
             .Include(u => u.MusicProfile)
             .Include(u => u.Images)
@@ -515,7 +515,15 @@ app.MapGet("/users", async (AppDbContext db, [FromQuery] int? userId, [FromQuery
             .AsNoTracking()
             .ToListAsync();
 
-        var userDict = users.ToDictionary(u => u.Id);
+        // ✅ FIX: Filter out users without MusicProfile before mapping
+        var validUsers = users.Where(u => u.MusicProfile != null).ToList();
+
+        if (validUsers.Count < users.Count)
+        {
+            Console.WriteLine($"⚠️ Filtered out {users.Count - validUsers.Count} users without MusicProfile");
+        }
+
+        var userDict = validUsers.ToDictionary(u => u.Id);
         var orderedUsers = topSuggestionIds
             .Where(id => userDict.ContainsKey(id))
             .Select(id => userDict[id])
@@ -597,12 +605,12 @@ static UserDto ToUserDto(User user) => new()
     Location = user.Location,
     Bio = user.Bio,
     SexualOrientation = user.SexualOrientation,
-    MusicProfile = new MusicProfileDto
+    MusicProfile = user.MusicProfile != null ? new MusicProfileDto
     {
-        FavoriteGenres = user.MusicProfile!.FavoriteGenres,
+        FavoriteGenres = user.MusicProfile.FavoriteGenres,
         FavoriteArtists = user.MusicProfile.FavoriteArtists,
         FavoriteSongs = user.MusicProfile.FavoriteSongs
-    },
+    } : null,
     Images = user.Images.Select(i => i.ImageUrl ?? i.Url).ToList()
 };
 
@@ -744,6 +752,56 @@ static async Task UpdateQueueScoresInBackground(int userId, List<int> suggestedU
         Console.WriteLine($"❌ Background update error: {ex.Message}\n{ex.StackTrace}");
     }
 }
+app.MapGet("/debug/user/{userId:int}", async (AppDbContext db, int userId) =>
+{
+    try
+    {
+        var user = await db.Users
+            .Include(u => u.MusicProfile)
+            .Include(u => u.Images)
+            .FirstOrDefaultAsync(u => u.Id == userId);
+
+        if (user == null)
+        {
+            return Results.NotFound(new
+            {
+                success = false,
+                message = $"User {userId} not found"
+            });
+        }
+
+        return Results.Ok(new
+        {
+            success = true,
+            userId = user.Id,
+            name = user.Name,
+            email = user.Email,
+            hasMusicProfile = user.MusicProfile != null,
+            musicProfile = user.MusicProfile != null ? new
+            {
+                id = user.MusicProfile.Id,
+                genres = user.MusicProfile.FavoriteGenres,
+                artists = user.MusicProfile.FavoriteArtists,
+                songs = user.MusicProfile.FavoriteSongs,
+                isEmpty = string.IsNullOrWhiteSpace(user.MusicProfile.FavoriteGenres) &&
+                         string.IsNullOrWhiteSpace(user.MusicProfile.FavoriteArtists) &&
+                         string.IsNullOrWhiteSpace(user.MusicProfile.FavoriteSongs)
+            } : null,
+            imageCount = user.Images.Count
+        });
+    }
+    catch (Exception ex)
+    {
+        return Results.Problem(
+            detail: ex.Message,
+            title: "Debug endpoint failed",
+            statusCode: 500
+        );
+    }
+})
+.WithName("DebugUserProfile")
+.WithSummary("Debug: Check if a user has a music profile and view its contents");
+
 // ---- Auto-seed endpoint (can be called manually) ----
 app.MapPost("/seed-database", async (AppDbContext db) =>
 {
@@ -1229,6 +1287,72 @@ app.MapPost("/auth/login", async (
     });
 });
 
+// Add this endpoint to Program.cs to fix users without music profiles:
+
+app.MapPost("/fix-missing-profiles", async (AppDbContext db) =>
+{
+    try
+    {
+        Console.WriteLine("🔧 Checking for users without music profiles...");
+
+        // Find all users without music profiles
+        var usersWithoutProfiles = await db.Users
+            .Include(u => u.MusicProfile)
+            .Where(u => u.MusicProfile == null)
+            .ToListAsync();
+
+        if (usersWithoutProfiles.Count == 0)
+        {
+            return Results.Ok(new
+            {
+                success = true,
+                message = "All users already have music profiles",
+            });
+        }
+
+        Console.WriteLine($"⚠️ Found {usersWithoutProfiles.Count} users without music profiles");
+
+        // Create default music profiles
+        var random = new Random();
+        var sampleGenres = new[] { "Pop", "Rock", "Hip Hop", "Jazz", "Electronic", "Classical", "Metal", "R&B", "Indie", "Latin" };
+        var sampleArtists = new[] { "Taylor Swift", "Drake", "Arctic Monkeys", "Beyoncé", "Eminem", "Daft Punk", "Bad Bunny", "Mozart", "The Weeknd", "Metallica" };
+        var sampleSongs = new[] { "Anti-Hero", "Blinding Lights", "Do I Wanna Know", "One More Time", "La Vida Es Un Carnaval", "HUMBLE.", "Enter Sandman", "Creep", "Kind of Blue", "Everlong" };
+
+        foreach (var user in usersWithoutProfiles)
+        {
+            var profile = new MusicProfile
+            {
+                UserId = user.Id,
+                FavoriteSongs = string.Join(", ", sampleSongs.OrderBy(_ => random.Next()).Take(3)),
+                FavoriteArtists = string.Join(", ", sampleArtists.OrderBy(_ => random.Next()).Take(3)),
+                FavoriteGenres = string.Join(", ", sampleGenres.OrderBy(_ => random.Next()).Take(3))
+            };
+
+            db.MusicProfiles.Add(profile);
+            Console.WriteLine($"   ✅ Created profile for user {user.Id} ({user.Name})");
+        }
+
+        await db.SaveChangesAsync();
+
+        return Results.Ok(new
+        {
+            success = true,
+            message = $"Created music profiles for {usersWithoutProfiles.Count} users",
+        });
+    }
+    catch (Exception ex)
+    {
+        Console.WriteLine($"❌ Error fixing profiles: {ex.Message}");
+        return Results.Problem(
+            detail: ex.Message,
+            title: "Failed to fix missing profiles",
+            statusCode: 500
+        );
+    }
+})
+.WithName("FixMissingProfiles")
+.WithSummary("Create music profiles for users that don't have them");
+
 // ---- User Management Endpoints ----
 app.MapPost("/users", Endpoints.CreateUser);
 app.MapGet("/users/{id:int}", Endpoints.GetUser);
@@ -1271,6 +1395,8 @@ static async Task SeedDatabaseAsync(AppDbContext db)
         return;
     }
 
+    Console.WriteLine("🌱 Starting database seeding...");
+
     var random = new Random();
     var sampleGenres = new[] { "Pop", "Rock", "Hip Hop", "Jazz", "Electronic", "Classical", "Metal", "R&B", "Indie", "Latin" };
     var sampleArtists = new[] { "Taylor Swift", "Drake", "Arctic Monkeys", "Beyoncé", "Eminem", "Daft Punk", "Bad Bunny", "Mozart", "The Weeknd", "Metallica" };
@@ -1287,25 +1413,39 @@ static async Task SeedDatabaseAsync(AppDbContext db)
         var location = sampleLocations[random.Next(sampleLocations.Length)];
         var bio = $"I am {name}, I love music and meeting new people!";
 
-        users.Add(new User
+        // ✅ Create user with embedded MusicProfile
+        var user = new User
         {
             Name = name,
             Email = email,
+            PasswordHash = "placeholder_hash",  // Add password hash
             Age = age,
+            Gender = "Other",  // Add required gender field
             Location = location,
             Bio = bio,
+            CreatedAt = DateTime.UtcNow,
             MusicProfile = new MusicProfile
             {
                 FavoriteSongs = string.Join(", ", sampleSongs.OrderBy(_ => random.Next()).Take(3)),
                 FavoriteArtists = string.Join(", ", sampleArtists.OrderBy(_ => random.Next()).Take(3)),
                 FavoriteGenres = string.Join(", ", sampleGenres.OrderBy(_ => random.Next()).Take(3))
             }
-        });
+        };
+
+        users.Add(user);
     }
 
+    Console.WriteLine($"📝 Adding {users.Count} users to database...");
     await db.Users.AddRangeAsync(users);
     await db.SaveChangesAsync();
+    Console.WriteLine("✅ Users saved");
 
+    // Verify music profiles were created
+    var profileCount = await db.MusicProfiles.CountAsync();
+    Console.WriteLine($"🎵 Music profiles created: {profileCount}");
+
+    // Add images
+    Console.WriteLine("🖼️ Adding user images...");
     var userImages = users.SelectMany(user => new[]
     {
         new UserImage { UserId = user.Id, ImageUrl = $"https://picsum.photos/400/600?random={user.Id}1" },
@@ -1314,8 +1454,9 @@ static async Task SeedDatabaseAsync(AppDbContext db)
 
     await db.UserImages.AddRangeAsync(userImages);
     await db.SaveChangesAsync();
+    Console.WriteLine($"✅ Added {userImages.Count} images");
 
-    Console.WriteLine($"✅ Seeded database with {users.Count} users");
+    Console.WriteLine($"✅ Seeding complete: {users.Count} users, {profileCount} music profiles");
 }
 // DTO for music profile update
 public record UpdateMusicProfileRequest(
