@@ -620,13 +620,27 @@ static double CalculateLocalCompatibility(MusicProfile p1, MusicProfile p2, User
     // Combine: Music (80%) + Preferences (20%)
     return Math.Round((musicScore * 0.8) + (preferenceScore * 0.2));
 }
+static bool IsAttractedTo(User attractor, string attractedToGender)
+{
+    // Attractor finds the gender attractive if their orientation matches the gender,
+    // or if their orientation is "Both".
+    return attractor.SexualOrientation == attractedToGender || attractor.SexualOrientation == "Both";
+}
 
 static double CalculatePreferenceCompatibility(User u1, User u2)
 {
-    if (u1.SexualOrientation == "Both" && u2.SexualOrientation == u1.Gender) { return 100.0; }
-    if (u2.SexualOrientation == "Both" && u1.SexualOrientation == u2.Gender) { return 100.0; }
-    if (u1.SexualOrientation == "Both" && u2.SexualOrientation == "Both") { return 100.0; }
-    if (u1.SexualOrientation == u2.Gender && u1.Gender == u2.SexualOrientation) { return 100.0; }
+    // 1. Check if u1 is attracted to u2's gender
+    bool u1_Attracted_To_u2 = IsAttractedTo(u1, u2.Gender);
+
+    // 2. Check if u2 is attracted to u1's gender
+    bool u2_Attracted_To_u1 = IsAttractedTo(u2, u1.Gender);
+
+    // Compatibility is 100.0 only if attraction is mutual (both ways)
+    if (u1_Attracted_To_u2 && u2_Attracted_To_u1)
+    {
+        return 100.0;
+    }
+
     return 0.0;
 }
 
