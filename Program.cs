@@ -42,7 +42,7 @@ builder.Services.AddDbContext<AppDbContext>(opt =>
     else
     {
         opt.UseSqlite(connectionString);
-        Console.WriteLine("Using SQLite database (local dev)");
+        Console.WriteLine("Using SQLite database");
     }
 });
 
