@@ -250,7 +250,7 @@ public class SpotifyService
         {
             Console.WriteLine($"🔍 Searching for artist: {artistName}");
 
-            var searchRequest = new SearchRequest(SearchRequest.Types.Artist, artistName) { Limit = 10 };
+            var searchRequest = new SearchRequest(SearchRequest.Types.Artist, artistName) { Limit = 20 };
             var searchResponse = await _spotify.Search.Item(searchRequest);
 
             if (searchResponse.Artists.Items == null || !searchResponse.Artists.Items.Any())
@@ -259,27 +259,34 @@ public class SpotifyService
                 return new List<SpotifySongDto>();
             }
 
+            // 1. Exact match (best)
             var artist = searchResponse.Artists.Items
-                .Where(a => a.Name.Equals(artistName, StringComparison.OrdinalIgnoreCase) && a.Popularity >= 80)
-                .OrderByDescending(a => a.Popularity)
-                .ThenByDescending(a => a.Followers.Total)
-                .FirstOrDefault();
+                .FirstOrDefault(a =>
+                    a.Name.Equals(artistName, StringComparison.OrdinalIgnoreCase));
 
+            // 2. "Almost exact match" (Levenshtein distance <= 2)
+            if (artist == null)
+            {
+                artist = searchResponse.Artists.Items
+                    .OrderBy(a => CalculateLevenshteinDistance(a.Name.ToLower(), artistName.ToLower()))
+                    .FirstOrDefault();
+            }
+
+            // 3. Fallback: Most popular if nothing reasonable found
             if (artist == null)
             {
                 artist = searchResponse.Artists.Items
                     .OrderByDescending(a => a.Popularity)
-                    .ThenByDescending(a => a.Followers.Total)
                     .FirstOrDefault();
             }
 
             if (artist == null)
             {
-                Console.WriteLine($"❌ Could not find valid artist for '{artistName}'");
+                Console.WriteLine($"❌ No valid artist match for '{artistName}'");
                 return new List<SpotifySongDto>();
             }
 
-            Console.WriteLine($"✅ Found artist: {artist.Name} (ID: {artist.Id})");
+            Console.WriteLine($"✅ Final chosen artist: {artist.Name} (ID: {artist.Id})");
 
             var topTracksResponse = await _spotify.Artists.GetTopTracks(artist.Id, new ArtistsTopTracksRequest("US"));
 
@@ -293,36 +300,6 @@ public class SpotifyService
             foreach (var track in topTracksResponse.Tracks.Take(limit))
             {
                 string? spotifyPreviewUrl = track.PreviewUrl;
-
-                // Try to find Spotify preview if missing
-                if (string.IsNullOrEmpty(spotifyPreviewUrl))
-                {
-                    try
-                    {
-                        var trackSearch = new SearchRequest(SearchRequest.Types.Track, $"{track.Name} {artist.Name}")
-                        {
-                            Limit = 5
-                        };
-                        var trackResults = await _spotify.Search.Item(trackSearch);
-
-                        var matchWithPreview = trackResults.Tracks?.Items?
-                            .FirstOrDefault(t =>
-                                t.Name.Equals(track.Name, StringComparison.OrdinalIgnoreCase) &&
-                                !string.IsNullOrEmpty(t.PreviewUrl));
-
-                        if (matchWithPreview != null)
-                        {
-                            spotifyPreviewUrl = matchWithPreview.PreviewUrl;
-                            Console.WriteLine($"   ✅ Found Spotify preview via search: {track.Name}");
-                        }
-                    }
-                    catch (Exception ex)
-                    {
-                        Console.WriteLine($"   ⚠️ Spotify track search failed: {ex.Message}");
-                    }
-                }
-
-                // 🎵 Try to get Deezer preview URL
                 string? deezerPreviewUrl = await GetDeezerPreviewUrlAsync(track.Name, artist.Name);
 
                 result.Add(new SpotifySongDto
@@ -334,15 +311,7 @@ public class SpotifyService
                     SpotifyUri = track.Uri,
                     SpotifyUrl = track.ExternalUrls.ContainsKey("spotify") ? track.ExternalUrls["spotify"] : null
                 });
-
-                var previewStatus = spotifyPreviewUrl != null ? "Spotify✓" :
-                                    deezerPreviewUrl != null ? "Deezer✓" : "None";
-                Console.WriteLine($"   Track: {track.Name} | Preview: {previewStatus}");
             }
-
-            var spotifyPreviews = result.Count(r => r.PreviewUrl != null);
-            var deezerPreviews = result.Count(r => r.DeezerPreviewUrl != null);
-            Console.WriteLine($"✅ Returning {result.Count} tracks (Spotify: {spotifyPreviews}, Deezer: {deezerPreviews})");
 
             return result;
         }
@@ -352,6 +321,31 @@ public class SpotifyService
             return new List<SpotifySongDto>();
         }
     }
+    private int CalculateLevenshteinDistance(string a, string b)
+    {
+        if (string.IsNullOrEmpty(a)) return b.Length;
+        if (string.IsNullOrEmpty(b)) return a.Length;
+
+        var d = new int[a.Length + 1, b.Length + 1];
+
+        for (int i = 0; i <= a.Length; i++) d[i, 0] = i;
+        for (int j = 0; j <= b.Length; j++) d[0, j] = j;
+
+        for (int i = 1; i <= a.Length; i++)
+        {
+            for (int j = 1; j <= b.Length; j++)
+            {
+                int cost = (a[i - 1] == b[j - 1]) ? 0 : 1;
+
+                d[i, j] = Math.Min(
+                    Math.Min(d[i - 1, j] + 1, d[i, j - 1] + 1),
+                    d[i - 1, j - 1] + cost);
+            }
+        }
+
+        return d[a.Length, b.Length];
+    }
+
     /// Searches Deezer for a track and returns its preview URL
     private async Task<string?> GetDeezerPreviewUrlAsync(string trackName, string artistName)
     {

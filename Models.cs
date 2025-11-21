@@ -212,12 +212,25 @@ public class TakeExUsersResponse
 
 public class RegisterRequest
 {
-    [Required] public string Name { get; set; } = string.Empty;
-    [Required, EmailAddress] public string Email { get; set; } = string.Empty;
-    [Required] public string Password { get; set; } = string.Empty;
-    [Range(18, 120)] public int Age { get; set; }
+    [Required]
+    public string Name { get; set; } = string.Empty;
+
+    [Required, EmailAddress]
+    public string Email { get; set; } = string.Empty;
+
+    [Required]
+    public string Password { get; set; } = string.Empty;
+
+    [Range(18, 120)]
+    public int Age { get; set; }
+
     public string Gender { get; set; } = string.Empty;
+
     public string? SexualOrientation { get; set; }
+
+    public string? Bio { get; set; } // Add Bio field
+
+    public string? ProfileImage { get; set; } // Profile image as base64
 }
 
 public class LoginRequestFromApp

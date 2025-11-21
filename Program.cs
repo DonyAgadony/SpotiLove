@@ -163,52 +163,56 @@ app.MapGet("/spotify/search-artists", async (SpotifyService spotifyService, stri
 .WithName("SearchArtists")
 .WithSummary("Search for artists on Spotify");
 
-app.MapGet("/spotify/debug-search-artist", async (
-    SpotifyService spotifyService,
-    string artistName) =>
+app.MapGet("/debug/all-users", async (AppDbContext db) =>
 {
     try
     {
-        await spotifyService.EnsureClientIsAuthenticatedAsync();
-        var spotify = spotifyService.GetSpotifyClient();
+        var users = await db.Users
+            .Include(u => u.MusicProfile)
+            .OrderByDescending(u => u.CreatedAt)
+            .Take(50) // Get last 20 users
+            .ToListAsync();
 
-        if (spotify == null)
-            return Results.Problem("Could not authenticate");
+        Console.WriteLine($"📊 Total users in database: {users.Count}");
 
-        var searchRequest = new SpotifyAPI.Web.SearchRequest(
-            SpotifyAPI.Web.SearchRequest.Types.Artist,
-            artistName)
+        var result = users.Select(u => new
         {
-            Limit = 10
-        };
-
-        var searchResponse = await spotify.Search.Item(searchRequest);
-
-        var results = searchResponse.Artists.Items?.Select(a => new
-        {
-            name = a.Name,
-            id = a.Id,
-            popularity = a.Popularity,
-            followers = a.Followers.Total,
-            genres = a.Genres,
-            url = $"https://open.spotify.com/artist/{a.Id}"
+            u.Id,
+            u.Name,
+            u.Email,
+            u.Age,
+            u.Gender,
+            u.SexualOrientation,
+            u.Bio,
+            u.CreatedAt,
+            HasMusicProfile = u.MusicProfile != null,
+            MusicProfile = u.MusicProfile != null ? new
+            {
+                u.MusicProfile.FavoriteGenres,
+                u.MusicProfile.FavoriteArtists,
+                u.MusicProfile.FavoriteSongs
+            } : null
         }).ToList();
 
         return Results.Ok(new
         {
-            query = artistName,
-            resultsCount = results?.Count ?? 0,
-            artists = results
+            success = true,
+            totalUsers = users.Count,
+            users = result
         });
     }
     catch (Exception ex)
     {
-        return Results.Problem(detail: ex.Message, title: "Debug search failed");
+        Console.WriteLine($"❌ Error fetching users: {ex.Message}");
+        return Results.Problem(
+            detail: ex.Message,
+            title: "Failed to fetch users",
+            statusCode: 500
+        );
     }
 })
-.WithName("DebugSearchArtist")
-.WithSummary("Debug: Search for an artist and see all results");
-
+.WithName("DebugAllUsers")
+.WithSummary("Debug: View all users in database");
 // Get top tracks from an artist
 app.MapGet("/spotify/artist-top-tracks"!, async (
     SpotifyService spotifyService,
@@ -1198,45 +1202,99 @@ app.MapPost("/auth/register", async (
     AppDbContext db,
     IPasswordHasher<User> hasher) =>
 {
-    // Check if email already exists
-    if (await db.Users.AnyAsync(u => u.Email == request.Email))
+    try
     {
-        return Results.BadRequest(new { success = false, message = "Email already exists" });
-    }
+        Console.WriteLine($"📝 Registration attempt for email: {request.Email}");
 
-    // Hash password
-    var hashedPassword = hasher.HashPassword(null!, request.Password);
-
-    // Create user
-    var user = new User
-    {
-        Name = request.Name,
-        Email = request.Email,
-        PasswordHash = hashedPassword,
-        Age = request.Age,
-        Gender = request.Gender
-    };
-
-    db.Users.Add(user);
-    await db.SaveChangesAsync();
-
-    // You could generate a JWT token here if you want
-    var token = Guid.NewGuid().ToString(); // Placeholder
-
-    return Results.Ok(new
-    {
-        success = true,
-        message = "User registered successfully",
-        token,
-        user = new
+        // Check if email already exists
+        if (await db.Users.AnyAsync(u => u.Email == request.Email))
         {
-            user.Id,
-            user.Name,
-            user.Email,
-            user.Age,
-            user.Gender
+            Console.WriteLine($"❌ Email already exists: {request.Email}");
+            return Results.BadRequest(new { success = false, message = "Email already exists" });
         }
-    });
+
+        // Hash password
+        var hashedPassword = hasher.HashPassword(null!, request.Password);
+        Console.WriteLine("✅ Password hashed successfully");
+
+        // Create user with ALL required fields
+        var user = new User
+        {
+            Name = request.Name,
+            Email = request.Email,
+            PasswordHash = hashedPassword,
+            Age = request.Age,
+            Gender = request.Gender,
+            SexualOrientation = request.SexualOrientation, // Include this
+            Bio = request.Bio, // Include bio from request
+            CreatedAt = DateTime.UtcNow,
+            Location = null, // Can be set later
+            LastLoginAt = null
+        };
+
+        Console.WriteLine($"✅ User object created: {user.Name}");
+
+        // Add user to database
+        db.Users.Add(user);
+
+        // Save changes and get the user ID
+        var saveResult = await db.SaveChangesAsync();
+        Console.WriteLine($"✅ SaveChanges returned: {saveResult} changes");
+        Console.WriteLine($"✅ User ID assigned: {user.Id}");
+
+        if (user.Id <= 0)
+        {
+            Console.WriteLine("❌ User ID was not assigned properly!");
+            return Results.Problem("Failed to create user - ID not assigned");
+        }
+
+        // Generate token
+        var token = Guid.NewGuid().ToString();
+        Console.WriteLine($"✅ Token generated: {token}");
+
+        // Verify user was saved by querying it back
+        var savedUser = await db.Users.FirstOrDefaultAsync(u => u.Id == user.Id);
+        if (savedUser == null)
+        {
+            Console.WriteLine($"❌ User {user.Id} was not found after save!");
+            return Results.Problem("User creation failed - could not verify save");
+        }
+
+        Console.WriteLine($"✅ User verified in database: {savedUser.Email}");
+
+        return Results.Ok(new
+        {
+            success = true,
+            message = "User registered successfully",
+            token,
+            user = new
+            {
+                user.Id,
+                user.Name,
+                user.Email,
+                user.Age,
+                user.Gender,
+                user.SexualOrientation,
+                user.Bio
+            }
+        });
+    }
+    catch (Exception ex)
+    {
+        Console.WriteLine($"❌ Registration error: {ex.Message}");
+        Console.WriteLine($"❌ Stack trace: {ex.StackTrace}");
+
+        if (ex.InnerException != null)
+        {
+            Console.WriteLine($"❌ Inner exception: {ex.InnerException.Message}");
+        }
+
+        return Results.Problem(
+            detail: ex.Message,
+            title: "Registration failed",
+            statusCode: 500
+        );
+    }
 });
 
 app.MapPost("/auth/login", async (
