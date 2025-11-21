@@ -31,8 +31,11 @@ public class User
     // Authentication & Auditing
     [Required, EmailAddress, MaxLength(150)]
     public string Email { get; set; } = string.Empty;
-
-    [Required]
+    [MaxLength(50)]
+    //Sexual orientation (e.g., "Gay", "Lesbian", "Bisexual", "Straight", "Queer", "Asexual", "Prefer not to say")
+    public string? SexualOrientation { get; set; }
+    //Gender identity (e.g., "Man", "Woman", "Non-binary", "Transgender", "Prefer not to say")
+    [MaxLength(50)]
     [JsonIgnore] // Typically ignore the hash for API responses
     public string PasswordHash { get; set; } = string.Empty;
 
@@ -188,7 +191,9 @@ public class UserDto
     public string? Location { get; set; }
     public string? Bio { get; set; }
     public string? Gender { get; set; }
-
+    public string? SexualOrientation { get; set; }
+    public string? GenderIdentity { get; set; }
+    public string? AttractionPreferences { get; set; }
     public string? Email { get; set; }
 
     public MusicProfileDto? MusicProfile { get; set; }
@@ -212,6 +217,7 @@ public class RegisterRequest
     [Required] public string Password { get; set; } = string.Empty;
     [Range(18, 120)] public int Age { get; set; }
     public string Gender { get; set; } = string.Empty;
+    public string? SexualOrientation { get; set; }
 }
 
 public class LoginRequestFromApp
@@ -237,9 +243,11 @@ public record CreateUserDto(
     string Genres,
     string Artists,
     string? ProfileImage = null,
-    string Songs = ""
+    string Songs = "",
+    string? SexualOrientation = null,
+    string? GenderIdentity = null,
+    string? AttractionPreferences = null
 );
-
 // Changed to nullable strings for partial updates
 public record UpdateProfileDto(string? Genres, string? Artists, string? Songs);
 
@@ -262,9 +270,9 @@ public class ResponseMessage
 // =======================================================
 public static class DtoMappers
 {
-    
+
     /// Helper to convert User entity to UserDto
-    
+
     public static UserDto ToUserDto(User user)
     {
         return new UserDto
@@ -289,9 +297,9 @@ public static class DtoMappers
 }
 public static class Endpoints
 {
-    
+
     /// Creates a new user with an initial music profile.
-    
+
     public static async Task<IResult> CreateUser(AppDbContext db, CreateUserDto dto)
     {
         var user = new User
@@ -323,9 +331,9 @@ public static class Endpoints
         });
     }
 
-    
+
     /// Gets a user profile by ID.
-    
+
     public static async Task<IResult> GetUser(AppDbContext db, int id)
     {
         var user = await db.Users
@@ -338,9 +346,9 @@ public static class Endpoints
         return Results.Ok(user); // Returning the full entity for simplicity
     }
 
-    
+
     /// Updates only the music profile fields.
-    
+
     public static async Task<IResult> UpdateProfile(AppDbContext db, int id, UpdateProfileDto dto)
     {
         var user = await db.Users
@@ -358,9 +366,9 @@ public static class Endpoints
         return Results.Ok(user);
     }
 
-    
+
     /// Returns a list of all users.
-    
+
     public static async Task<IResult> SearchUsers(AppDbContext db)
     {
         var users = await db.Users
@@ -372,9 +380,9 @@ public static class Endpoints
         return Results.Ok(users);
     }
 
-    
+
     /// Adds a new image URL to a user's profile.
-    
+
     public static async Task<IResult> AddUserImage(AppDbContext db, int id, UserImage image)
     {
         var user = await db.Users.FirstOrDefaultAsync(u => u.Id == id);
@@ -393,9 +401,9 @@ public static class Endpoints
         return Results.Ok(image);
     }
 
-    
+
     /// Gets all images for a specific user.
-    
+
     public static async Task<IResult> GetUserImages(AppDbContext db, int id)
     {
         var user = await db.Users

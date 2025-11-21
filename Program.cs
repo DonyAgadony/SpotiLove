@@ -421,7 +421,8 @@ app.MapGet("/users", async (AppDbContext db, [FromQuery] int? userId, [FromQuery
                         UserId = user.Id,
                         Score = CalculateLocalCompatibility(
                             currentUser.MusicProfile,
-                            user.MusicProfile!)
+                            user.MusicProfile!,
+                            currentUser, user)
                     })
                     .OrderByDescending(x => x.Score)
                     .ToList();
@@ -595,6 +596,7 @@ static UserDto ToUserDto(User user) => new()
     Age = user.Age,
     Location = user.Location,
     Bio = user.Bio,
+    SexualOrientation = user.SexualOrientation,
     MusicProfile = new MusicProfileDto
     {
         FavoriteGenres = user.MusicProfile!.FavoriteGenres,
@@ -604,13 +606,28 @@ static UserDto ToUserDto(User user) => new()
     Images = user.Images.Select(i => i.ImageUrl ?? i.Url).ToList()
 };
 
-static double CalculateLocalCompatibility(MusicProfile p1, MusicProfile p2)
+static double CalculateLocalCompatibility(MusicProfile p1, MusicProfile p2, User u1, User u2)
 {
+    // Existing music scoring
     double genreScore = JaccardSimilarity(p1.FavoriteGenres, p2.FavoriteGenres);
     double artistScore = JaccardSimilarity(p1.FavoriteArtists, p2.FavoriteArtists);
     double songScore = JaccardSimilarity(p1.FavoriteSongs, p2.FavoriteSongs);
+    double musicScore = genreScore * 30 + artistScore * 40 + songScore * 30;
 
-    return Math.Round((genreScore * 30 + artistScore * 40 + songScore * 30));
+    // New: LGBTQ+ preference scoring (0-100, weighted at 20% of total)
+    double preferenceScore = CalculatePreferenceCompatibility(u1, u2);
+
+    // Combine: Music (80%) + Preferences (20%)
+    return Math.Round((musicScore * 0.8) + (preferenceScore * 0.2));
+}
+
+static double CalculatePreferenceCompatibility(User u1, User u2)
+{
+    if (u1.SexualOrientation == "Both" && u2.SexualOrientation == u1.Gender) { return 100.0; }
+    if (u2.SexualOrientation == "Both" && u1.SexualOrientation == u2.Gender) { return 100.0; }
+    if (u1.SexualOrientation == "Both" && u2.SexualOrientation == "Both") { return 100.0; }
+    if (u1.SexualOrientation == u2.Gender && u1.Gender == u2.SexualOrientation) { return 100.0; }
+    return 0.0;
 }
 
 static double JaccardSimilarity(string a, string b)
