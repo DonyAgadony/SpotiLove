@@ -166,3 +166,4 @@ C:\Users\User\Desktop\DanielHamelech\SpotiLove\JsonDemo\obj\Debug\net9.0\staticw
 C:\Users\User\Desktop\DanielHamelech\SpotiLove\JsonDemo\bin\Debug\net9.0\Npgsql.dll
 C:\Users\User\Desktop\DanielHamelech\SpotiLove\JsonDemo\bin\Debug\net9.0\Npgsql.EntityFrameworkCore.PostgreSQL.dll
 C:\Users\User\Desktop\DanielHamelech\SpotiLove\JsonDemo\bin\Debug\net9.0\Spotify.dll
+C:\Users\User\Desktop\DanielHamelech\SpotiLove\JsonDemo\bin\Debug\net9.0\EFCore.NamingConventions.dll

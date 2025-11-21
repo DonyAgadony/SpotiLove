@@ -19,6 +19,20 @@
           "lib/netstandard1.3/DotNetEnv.dll": {}
         }
       },
+      "EFCore.NamingConventions/9.0.0": {
+        "type": "package",
+        "dependencies": {
+          "Microsoft.EntityFrameworkCore": "[9.0.0, 10.0.0)",
+          "Microsoft.EntityFrameworkCore.Relational": "[9.0.0, 10.0.0)",
+          "Microsoft.Extensions.DependencyInjection.Abstractions": "9.0.0"
+        },
+        "compile": {
+          "lib/net8.0/EFCore.NamingConventions.dll": {}
+        },
+        "runtime": {
+          "lib/net8.0/EFCore.NamingConventions.dll": {}
+        }
+      },
       "EmbedIO/3.5.2": {
         "type": "package",
         "dependencies": {
@@ -2707,6 +2721,18 @@
         "dotnetenv.3.1.1.nupkg.sha512",
         "dotnetenv.nuspec",
         "lib/netstandard1.3/DotNetEnv.dll"
+      ]
+    },
+    "EFCore.NamingConventions/9.0.0": {
+      "sha512": "heKIYzPdEWx+Ba4xuG6jfEssW9rEi7I0lX38eoN7wo7qgg9uw7nn8UEmDQfwGEYPzSDpetCVANnDr5tqt2Asjg==",
+      "type": "package",
+      "path": "efcore.namingconventions/9.0.0",
+      "files": [
+        ".nupkg.metadata",
+        ".signature.p7s",
+        "efcore.namingconventions.9.0.0.nupkg.sha512",
+        "efcore.namingconventions.nuspec",
+        "lib/net8.0/EFCore.NamingConventions.dll"
       ]
     },
     "EmbedIO/3.5.2": {
@@ -8584,6 +8610,7 @@
   "projectFileDependencyGroups": {
     "net9.0": [
       "DotNetENV >= 3.1.1",
+      "EFCore.NamingConventions >= 9.0.0",
       "Microsoft.AspNetCore.OpenApi >= 9.0.2",
       "Microsoft.Data.SQLite >= 9.0.8",
       "Microsoft.EntityFrameworkCore >= 9.0.10",
@@ -8651,6 +8678,10 @@
           "DotNetENV": {
             "target": "Package",
             "version": "[3.1.1, )"
+          },
+          "EFCore.NamingConventions": {
+            "target": "Package",
+            "version": "[9.0.0, )"
           },
           "Microsoft.AspNetCore.OpenApi": {
             "target": "Package",

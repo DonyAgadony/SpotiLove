@@ -9,6 +9,7 @@
       "JsonDemo/1.0.0": {
         "dependencies": {
           "DotNetEnv": "3.1.1",
+          "EFCore.NamingConventions": "9.0.0",
           "Microsoft.AspNetCore.OpenApi": "9.0.2",
           "Microsoft.Data.Sqlite": "9.0.8",
           "Microsoft.EntityFrameworkCore": "9.0.10",
@@ -38,6 +39,19 @@
           "lib/netstandard1.3/DotNetEnv.dll": {
             "assemblyVersion": "3.1.1.0",
             "fileVersion": "3.1.1.0"
+          }
+        }
+      },
+      "EFCore.NamingConventions/9.0.0": {
+        "dependencies": {
+          "Microsoft.EntityFrameworkCore": "9.0.10",
+          "Microsoft.EntityFrameworkCore.Relational": "9.0.8",
+          "Microsoft.Extensions.DependencyInjection.Abstractions": "9.0.10"
+        },
+        "runtime": {
+          "lib/net8.0/EFCore.NamingConventions.dll": {
+            "assemblyVersion": "9.0.0.0",
+            "fileVersion": "9.0.0.0"
           }
         }
       },
@@ -1658,6 +1672,13 @@
       "sha512": "sha512-o4SqUVCq0pqHF/HYsZk6k22XGIVmvsDVo+Dy7l0ubq9uQ45JkXswrMRJmYvhGLXWFYF0M5OupMonytB+0zvpGQ==",
       "path": "dotnetenv/3.1.1",
       "hashPath": "dotnetenv.3.1.1.nupkg.sha512"
+    },
+    "EFCore.NamingConventions/9.0.0": {
+      "type": "package",
+      "serviceable": true,
+      "sha512": "sha512-heKIYzPdEWx+Ba4xuG6jfEssW9rEi7I0lX38eoN7wo7qgg9uw7nn8UEmDQfwGEYPzSDpetCVANnDr5tqt2Asjg==",
+      "path": "efcore.namingconventions/9.0.0",
+      "hashPath": "efcore.namingconventions.9.0.0.nupkg.sha512"
     },
     "EmbedIO/3.5.2": {
       "type": "package",

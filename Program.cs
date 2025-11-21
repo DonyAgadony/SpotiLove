@@ -20,27 +20,29 @@ var connectionString = Environment.GetEnvironmentVariable("DATABASE_URL")
 
 builder.Services.AddDbContext<AppDbContext>(opt =>
 {
-    if (connectionString.StartsWith("postgres://"))
+    if (connectionString.StartsWith("postgres://") || connectionString.StartsWith("postgresql://"))
     {
-        // Convert Render-style postgres:// URL to standard connection string
         var databaseUri = new Uri(connectionString);
-        var userInfo = databaseUri.UserInfo.Split(':');
+        var userInfo = databaseUri.UserInfo.Split(':', 2);
 
-        var connStr = $"Host={databaseUri.Host};" +
-                     $"Port={databaseUri.Port};" +
-                     $"Database={databaseUri.LocalPath.TrimStart('/')};" +
-                     $"Username={userInfo[0]};" +
-                     $"Password={userInfo[1]};" +
-                     $"SSL Mode=Require;" +
-                     $"Trust Server Certificate=true";
+        var connStr =
+            $"Host={databaseUri.Host};" +
+            $"Port={databaseUri.Port};" +
+            $"Database={databaseUri.LocalPath.TrimStart('/')};" +
+            $"Username={userInfo[0]};" +
+            $"Password={userInfo[1]};" +
+            $"SSL Mode=Require;" +
+            $"Trust Server Certificate=true";
 
-        opt.UseNpgsql(connStr);
-        Console.WriteLine("🐘 Using PostgreSQL database");
+        opt.UseNpgsql(connStr)
+           .UseSnakeCaseNamingConvention();
+
+        Console.WriteLine("Using PostgreSQL database");
     }
     else
     {
         opt.UseSqlite(connectionString);
-        Console.WriteLine("📁 Using SQLite database (local dev)");
+        Console.WriteLine("Using SQLite database (local dev)");
     }
 });
 
@@ -677,10 +679,21 @@ static async Task UpdateQueueScoresInBackground(int userId, List<int> suggestedU
 {
     try
     {
-        Console.WriteLine($"🤖 Starting background Gemini updates for {suggestedUserIds.Count} users...");
+        Console.WriteLine($"Starting background Gemini updates for {suggestedUserIds.Count} users...");
 
         var optionsBuilder = new DbContextOptionsBuilder<AppDbContext>();
-        optionsBuilder.UseSqlite("Data Source=spotilove.db");
+
+        var cs = Environment.GetEnvironmentVariable("DATABASE_URL")
+                 ?? "Data Source=spotilove.db";
+
+        if (cs.StartsWith("postgres://") || cs.StartsWith("postgresql://"))
+        {
+            optionsBuilder.UseNpgsql(BuildNpgsqlConnectionString(cs));
+        }
+        else
+        {
+            optionsBuilder.UseSqlite(cs);
+        }
 
         using var db = new AppDbContext(optionsBuilder.Options);
 
@@ -691,14 +704,13 @@ static async Task UpdateQueueScoresInBackground(int userId, List<int> suggestedU
 
         if (currentUser?.MusicProfile == null)
         {
-            Console.WriteLine("⚠️ Current user not found in background task");
+            Console.WriteLine("Current user not found in background task");
             return;
         }
 
         int successCount = 0;
         int failCount = 0;
 
-        // Process users with rate limiting
         foreach (var suggestedId in suggestedUserIds)
         {
             try
@@ -710,7 +722,7 @@ static async Task UpdateQueueScoresInBackground(int userId, List<int> suggestedU
 
                 if (suggestedUser?.MusicProfile == null)
                 {
-                    Console.WriteLine($"⚠️ Suggested user {suggestedId} not found");
+                    Console.WriteLine($"Suggested user {suggestedId} not found");
                     continue;
                 }
 
@@ -730,81 +742,97 @@ static async Task UpdateQueueScoresInBackground(int userId, List<int> suggestedU
                         queueItem.CompatibilityScore = geminiScore.Value;
                         await db.SaveChangesAsync();
                         successCount++;
-                        Console.WriteLine($"✅ Gemini score for user {suggestedId}: {geminiScore}% (was {queueItem.CompatibilityScore}%)");
+                        Console.WriteLine($"Gemini score for user {suggestedId}: {geminiScore}%");
                     }
                 }
                 else
                 {
                     failCount++;
-                    Console.WriteLine($"⚠️ Gemini returned null for user {suggestedId}");
+                    Console.WriteLine($"Gemini returned null for user {suggestedId}");
                 }
 
-                // Rate limit: 500ms between calls
                 await Task.Delay(500);
             }
             catch (Exception ex)
             {
                 failCount++;
-                Console.WriteLine($"❌ Gemini failed for user {suggestedId}: {ex.Message}");
+                Console.WriteLine($"Gemini failed for user {suggestedId}: {ex.Message}");
             }
         }
 
-        Console.WriteLine($"🎯 Background update complete: {successCount} success, {failCount} failed");
+        Console.WriteLine($"Background update complete: {successCount} success, {failCount} failed");
     }
     catch (Exception ex)
     {
-        Console.WriteLine($"❌ Background update error: {ex.Message}\n{ex.StackTrace}");
+        Console.WriteLine($"Background update error: {ex.Message}\n{ex.StackTrace}");
     }
 }
-app.MapGet("/debug/user/{userId:int}", async (AppDbContext db, int userId) =>
+
+static string BuildNpgsqlConnectionString(string databaseUrl)
 {
-    try
-    {
-        var user = await db.Users
-            .Include(u => u.MusicProfile)
-            .Include(u => u.Images)
-            .FirstOrDefaultAsync(u => u.Id == userId);
+    var uri = new Uri(databaseUrl);
+    var userInfo = uri.UserInfo.Split(':', 2);
 
-        if (user == null)
-        {
-            return Results.NotFound(new
-            {
-                success = false,
-                message = $"User {userId} not found"
-            });
-        }
-
-        return Results.Ok(new
-        {
-            success = true,
-            userId = user.Id,
-            name = user.Name,
-            email = user.Email,
-            hasMusicProfile = user.MusicProfile != null,
-            musicProfile = user.MusicProfile != null ? new
-            {
-                id = user.MusicProfile.Id,
-                genres = user.MusicProfile.FavoriteGenres,
-                artists = user.MusicProfile.FavoriteArtists,
-                songs = user.MusicProfile.FavoriteSongs,
-                isEmpty = string.IsNullOrWhiteSpace(user.MusicProfile.FavoriteGenres) &&
-                         string.IsNullOrWhiteSpace(user.MusicProfile.FavoriteArtists) &&
-                         string.IsNullOrWhiteSpace(user.MusicProfile.FavoriteSongs)
-            } : null,
-            imageCount = user.Images.Count
-        });
-    }
-    catch (Exception ex)
+    return new Npgsql.NpgsqlConnectionStringBuilder
     {
-        return Results.Problem(
-            detail: ex.Message,
-            title: "Debug endpoint failed",
-            statusCode: 500
-        );
-    }
-})
-.WithName("DebugUserProfile")
-.WithSummary("Debug: Check if a user has a music profile and view its contents");
+        Host = uri.Host,
+        Port = uri.Port,
+        Username = userInfo[0],
+        Password = userInfo[1],
+        Database = uri.AbsolutePath.TrimStart('/'),
+        SslMode = Npgsql.SslMode.Require,
+        TrustServerCertificate = true
+    }.ConnectionString;
+}
+app.MapGet("/debug/user/{userId:int}", async (AppDbContext db, int userId) =>
+        {
+            try
+            {
+                var user = await db.Users
+                    .Include(u => u.MusicProfile)
+                    .Include(u => u.Images)
+                    .FirstOrDefaultAsync(u => u.Id == userId);
+
+                if (user == null)
+                {
+                    return Results.NotFound(new
+                    {
+                        success = false,
+                        message = $"User {userId} not found"
+                    });
+                }
+
+                return Results.Ok(new
+                {
+                    success = true,
+                    userId = user.Id,
+                    name = user.Name,
+                    email = user.Email,
+                    hasMusicProfile = user.MusicProfile != null,
+                    musicProfile = user.MusicProfile != null ? new
+                    {
+                        id = user.MusicProfile.Id,
+                        genres = user.MusicProfile.FavoriteGenres,
+                        artists = user.MusicProfile.FavoriteArtists,
+                        songs = user.MusicProfile.FavoriteSongs,
+                        isEmpty = string.IsNullOrWhiteSpace(user.MusicProfile.FavoriteGenres) &&
+                                 string.IsNullOrWhiteSpace(user.MusicProfile.FavoriteArtists) &&
+                                 string.IsNullOrWhiteSpace(user.MusicProfile.FavoriteSongs)
+                    } : null,
+                    imageCount = user.Images.Count
+                });
+            }
+            catch (Exception ex)
+            {
+                return Results.Problem(
+                    detail: ex.Message,
+                    title: "Debug endpoint failed",
+                    statusCode: 500
+                );
+            }
+        })
+        .WithName("DebugUserProfile")
+        .WithSummary("Debug: Check if a user has a music profile and view its contents");
 
 // ---- Auto-seed endpoint (can be called manually) ----
 app.MapPost("/seed-database", async (AppDbContext db) =>
@@ -930,8 +958,6 @@ app.MapGet("/callback", async (
                 // Create a new DB context for this background task
                 var optionsBuilder = new DbContextOptionsBuilder<AppDbContext>();
                 var connectionString = db.Database.GetConnectionString();
-                optionsBuilder.UseSqlite(connectionString);
-
                 using var bgDb = new AppDbContext(optionsBuilder.Options);
 
                 var bgUser = await bgDb.Users
@@ -1516,6 +1542,7 @@ static async Task SeedDatabaseAsync(AppDbContext db)
 
     Console.WriteLine($"✅ Seeding complete: {users.Count} users, {profileCount} music profiles");
 }
+
 // DTO for music profile update
 public record UpdateMusicProfileRequest(
     string Artists,
