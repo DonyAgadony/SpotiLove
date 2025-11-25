@@ -781,7 +781,6 @@ static string BuildNpgsqlConnectionString(string databaseUrl)
         Password = userInfo[1],
         Database = uri.AbsolutePath.TrimStart('/'),
         SslMode = Npgsql.SslMode.Require,
-        TrustServerCertificate = true
     }.ConnectionString;
 }
 app.MapGet("/debug/user/{userId:int}", async (AppDbContext db, int userId) =>
