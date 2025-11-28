@@ -78,9 +78,9 @@ public class SwipeService
             Id = u.Id,
             Name = u.Name,
             Age = u.Age,
-            Location = u.Location,
-            Bio = u.Bio,
-            MusicProfile = u.MusicProfile != null ? new MusicProfileDto
+            Location = u.Location!,
+            Bio = u.Bio!,
+            MusicProfile = u.MusicProfile! != null ? new MusicProfileDto
             {
                 FavoriteArtists = u.MusicProfile.FavoriteArtists,
                 FavoriteGenres = u.MusicProfile.FavoriteGenres,

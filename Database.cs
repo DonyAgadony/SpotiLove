@@ -1,8 +1,7 @@
 using System.Text;
 using Microsoft.EntityFrameworkCore;
-using System.ComponentModel.DataAnnotations;
-using System.ComponentModel.DataAnnotations.Schema;
-using System.Text.Json.Serialization;
+using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
+using Microsoft.EntityFrameworkCore.ChangeTracking;
 
 namespace Spotilove;
 // =======================================================
@@ -22,78 +21,70 @@ public class AppDbContext : DbContext
     {
         base.OnModelCreating(modelBuilder);
 
-        // ===== User ↔ MusicProfile (1-1) =====
-        modelBuilder.Entity<User>()
-            .HasOne(u => u.MusicProfile)
-            .WithOne(m => m.User)
-            .HasForeignKey<MusicProfile>(m => m.UserId)
+        // ===== Composite Keys =====
+        modelBuilder.Entity<Like>()
+            .HasKey(l => new { l.FromUserId, l.ToUserId });
+
+        modelBuilder.Entity<UserSuggestionQueue>()
+            .HasKey(usq => new { usq.UserId, usq.SuggestedUserId });
+
+        // ===== Relationships =====
+        modelBuilder.Entity<Like>()
+            .HasOne(l => l.FromUser)
+            .WithMany(u => u.LikesSent)
+            .HasForeignKey(l => l.FromUserId)
             .OnDelete(DeleteBehavior.Cascade);
 
-        // ===== User ↔ UserImage (1-many) =====
+        modelBuilder.Entity<Like>()
+            .HasOne(l => l.ToUser)
+            .WithMany(u => u.LikesReceived)
+            .HasForeignKey(l => l.ToUserId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        modelBuilder.Entity<UserSuggestionQueue>()
+            .HasOne(usq => usq.User)
+            .WithMany(u => u.Suggestions)
+            .HasForeignKey(usq => usq.UserId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        modelBuilder.Entity<UserSuggestionQueue>()
+            .HasOne(usq => usq.SuggestedUser)
+            .WithMany()
+            .HasForeignKey(usq => usq.SuggestedUserId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        modelBuilder.Entity<MusicProfile>()
+            .HasOne(mp => mp.User)
+            .WithOne(u => u.MusicProfile)
+            .HasForeignKey<MusicProfile>(mp => mp.UserId)
+            .OnDelete(DeleteBehavior.Cascade);
+
         modelBuilder.Entity<UserImage>()
             .HasOne(ui => ui.User)
             .WithMany(u => u.Images)
             .HasForeignKey(ui => ui.UserId)
             .OnDelete(DeleteBehavior.Cascade);
 
-        // ===== Like Relationships (Composite Key) =====
-        // 1. Define the Composite Primary Key: (FromUserId, ToUserId)
-        modelBuilder.Entity<Like>()
-            .HasKey(l => new { l.FromUserId, l.ToUserId });
-
-        // 2. FromUser (The user initiating the swipe)
-        modelBuilder.Entity<Like>()
-            .HasOne(l => l.FromUser)
-            .WithMany(u => u.Likes) // Assuming 'Likes' is the property on User for outgoing swipes (as per your previous model fix)
-            .HasForeignKey(l => l.FromUserId)
-            .OnDelete(DeleteBehavior.Restrict);
-
-        // 3. ToUser (The user being swiped on)
-        modelBuilder.Entity<Like>()
-            .HasOne(l => l.ToUser)
-            .WithMany(u => u.LikesReceived) // Assuming 'LikesReceived' or similar is defined on User for incoming swipes
-            .HasForeignKey(l => l.ToUserId)
-            .OnDelete(DeleteBehavior.Restrict);
-
-        // OPTIMIZATION: Composite unique index (already handled by composite primary key, but good to ensure)
-        modelBuilder.Entity<Like>()
-            .HasIndex(l => new { l.FromUserId, l.ToUserId })
-            .IsUnique();
-
-        // ===== UserSuggestionQueue Configuration (Composite Key) =====
-        modelBuilder.Entity<UserSuggestionQueue>(entity =>
+        // ===== List<string> conversions for MusicProfile =====
+        modelBuilder.Entity<MusicProfile>(entity =>
         {
-            // FIX: Must define a COMPOSITE key for uniqueness per user
-            entity.HasKey(e => new { e.UserId, e.SuggestedUserId });
+            var converter = new ValueConverter<List<string>, string>(
+                v => string.Join(',', v),
+                v => v.Split(',', StringSplitOptions.RemoveEmptyEntries).ToList()
+            );
 
-            // The user whose queue this is
-            entity.HasOne(e => e.User)
-                .WithMany(u => u.Suggestions) // Assuming 'Suggestions' collection on User
-                .HasForeignKey(e => e.UserId)
-                .OnDelete(DeleteBehavior.Cascade);
+            var comparer = new ValueComparer<List<string>>(
+                (c1, c2) => c1.SequenceEqual(c2),
+                c => c.Aggregate(0, (a, v) => HashCode.Combine(a, v.GetHashCode())),
+                c => c.ToList()
+            );
 
-            // The user being suggested
-            entity.HasOne(e => e.SuggestedUser)
-                .WithMany() // No navigation property needed on SuggestedUser side
-                .HasForeignKey(e => e.SuggestedUserId)
-                .OnDelete(DeleteBehavior.Restrict);
-
-            // OPTIMIZATION: Index for queue position lookups
-            entity.HasIndex(e => new { e.UserId, e.QueuePosition });
-
-            // OPTIMIZATION: Index for score-based queries
-            entity.HasIndex(e => new { e.UserId, e.CompatibilityScore });
+            entity.Property(e => e.FavoriteGenres).HasConversion(converter).Metadata.SetValueComparer(comparer);
+            entity.Property(e => e.FavoriteArtists).HasConversion(converter).Metadata.SetValueComparer(comparer);
+            entity.Property(e => e.FavoriteSongs).HasConversion(converter).Metadata.SetValueComparer(comparer);
         });
-
-        // OPTIMIZATION: Index on Email for auth lookups
-        modelBuilder.Entity<User>()
-            .HasIndex(u => u.Email)
-            .IsUnique(); // Email must be unique for registration
     }
 }
-
-
-// ===== PASSWORD UTILS =====
 public static class PasswordHasher
 {
     public static async Task<IResult> SendLike(AppDbContext db, SendLikeDto dto)
@@ -217,9 +208,9 @@ public static class PasswordHasher
             PasswordHash = PasswordHasher.HashPassword(dto.Password), // Hashing the password
             MusicProfile = new MusicProfile
             {
-                FavoriteGenres = dto.Genres,
-                FavoriteArtists = dto.Artists,
-                FavoriteSongs = dto.Songs
+                FavoriteGenres = dto.Genres.Split(',').ToList(),
+                FavoriteArtists = dto.Artists.Split(',').ToList(),
+                FavoriteSongs = dto.Songs.Split(',').ToList(),
             }
         };
 
@@ -264,9 +255,9 @@ public static class PasswordHasher
         }
 
         // Apply updates only if the DTO field is not null
-        if (dto.Genres != null) user.MusicProfile.FavoriteGenres = dto.Genres;
-        if (dto.Artists != null) user.MusicProfile.FavoriteArtists = dto.Artists;
-        if (dto.Songs != null) user.MusicProfile.FavoriteSongs = dto.Songs;
+        if (dto.Genres != null) user.MusicProfile.FavoriteGenres = dto.Genres.Split(',').ToList();
+        if (dto.Artists != null) user.MusicProfile.FavoriteArtists = dto.Artists.Split(',').ToList();
+        if (dto.Songs != null) user.MusicProfile.FavoriteSongs = dto.Songs.Split(',').ToList();
 
         await db.SaveChangesAsync();
 
@@ -330,3 +321,4 @@ public static class PasswordHasher
         return Results.Ok(images);
     }
 }
+

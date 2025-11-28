@@ -1,108 +1,51 @@
-using System.ComponentModel.DataAnnotations;
-using System.ComponentModel.DataAnnotations.Schema;
 using System.Text.Json.Serialization;
+using System.ComponentModel.DataAnnotations.Schema;
+using System.ComponentModel.DataAnnotations;
 using Microsoft.EntityFrameworkCore;
+
 namespace Spotilove;
 
-// ============ DATABASE ENTITIES (MODELS) ===============
 public class User
 {
-    // Primary Key
-    [Key]
     public int Id { get; set; }
-
-    // Core Profile Data
-    [Required, MaxLength(100)]
     public string Name { get; set; } = string.Empty;
-
-    [Required]
-    [Range(18, 120)]
     public int Age { get; set; }
-
-    [Required, MaxLength(20)]
     public string Gender { get; set; } = string.Empty;
-
-    [MaxLength(500)]
     public string? Bio { get; set; }
-
-    [MaxLength(100)]
     public string? Location { get; set; }
-
-    // Authentication & Auditing
-    [Required, EmailAddress, MaxLength(150)]
     public string Email { get; set; } = string.Empty;
-    [MaxLength(50)]
-    //Sexual orientation (e.g., "Gay", "Lesbian", "Bisexual", "Straight", "Queer", "Asexual", "Prefer not to say")
+    [JsonIgnore] public string PasswordHash { get; set; } = string.Empty;
     public string? SexualOrientation { get; set; }
-    //Gender identity (e.g., "Man", "Woman", "Non-binary", "Transgender", "Prefer not to say")
-    [MaxLength(50)]
-    [JsonIgnore] // Typically ignore the hash for API responses
-    public string PasswordHash { get; set; } = string.Empty;
-
     public DateTime? LastLoginAt { get; set; }
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 
-    // --- Navigation Properties ---
-
-    // 1-1 relationship with MusicProfile
+    // Navigation properties
     public MusicProfile? MusicProfile { get; set; }
-
-    // 1-Many relationship with UserImage
     public List<UserImage> Images { get; set; } = new();
-
-    // Many-to-Many relationship via Like (Outgoing swipes/likes INITIATED by this user)
-    // Used by AppDbContext for Likes.FromUser relationship
-    public List<Like> Likes { get; set; } = new();
-
-    // Many-to-Many relationship via Like (Incoming swipes/likes RECEIVED by this user)
-    // Used by AppDbContext for Likes.ToUser relationship
+    public List<Like> LikesSent { get; set; } = new();
     public List<Like> LikesReceived { get; set; } = new();
-
-    // 1-Many relationship with UserSuggestionQueue (This user's queue of potential matches)
-    // Used by AppDbContext for USQ.User relationship
     public List<UserSuggestionQueue> Suggestions { get; set; } = new();
 }
 
-/// Stores music-related preferences for a User (1-1 relationship).
 public class MusicProfile
 {
-    // Primary Key (often same as UserId for a 1:1 relationship)
-    [Key]
     public int Id { get; set; }
+    public int UserId { get; set; }
+    public List<string> FavoriteGenres { get; set; } = new();
+    public List<string> FavoriteArtists { get; set; } = new();
+    public List<string> FavoriteSongs { get; set; } = new();
 
-    [Required]
-    public int UserId { get; set; } // Foreign Key to User
-
-    // Music Data (Stored as strings, often JSON or comma-separated in real apps)
-    [MaxLength(500)]
-    public string FavoriteGenres { get; set; } = "";
-
-    [MaxLength(1000)]
-    public string FavoriteArtists { get; set; } = "";
-
-    [MaxLength(1000)]
-    public string FavoriteSongs { get; set; } = "";
-
-    // Navigation Property
     [JsonIgnore]
+    [ForeignKey(nameof(UserId))]
     public User? User { get; set; }
 }
 
 public class UserImage
 {
-    // Primary Key (Inherited from both)
-    [Key]
     public int Id { get; set; }
-
-    // Foreign Key to User (Inherited from both, with Required annotation added)
-    [Required]
     public int UserId { get; set; }
-
-    // Core Image Data (Uses ImageUrl from the second snippet as the source of truth)
-    [Required, MaxLength(2048)]
     public string ImageUrl { get; set; } = string.Empty;
 
-    // [NotMapped] ensures EF Core doesn't try to save this to the database.
     [NotMapped]
     public string Url
     {
@@ -110,64 +53,42 @@ public class UserImage
         set => ImageUrl = value;
     }
 
-    // [JsonIgnore] prevents this property from being included in JSON output
-    // when serializing the UserImage object, preventing circular references.
     [JsonIgnore]
+    [ForeignKey(nameof(UserId))]
     public User? User { get; set; }
 }
 
-/// Represents a swipe/like action between two users (Many-to-Many relationship).
-/// Uses a composite key (FromUserId, ToUserId).
-
 public class Like
 {
-    // Composite Key Part 1: The user who initiated the swipe
-    [Key, Column(Order = 0)]
     public int FromUserId { get; set; }
-
-    // Composite Key Part 2: The user who was swiped on
-    [Key, Column(Order = 1)]
     public int ToUserId { get; set; }
-
-    // True for like (swipe right), false for dislike (swipe left)
     public bool IsLike { get; set; }
-
-    // True if the ToUser has also liked the FromUser (resulting in a match)
     public bool IsMatch { get; set; } = false;
-
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 
-    // Navigation Properties
     [JsonIgnore]
+    [ForeignKey(nameof(FromUserId))]
     public User FromUser { get; set; } = null!;
 
     [JsonIgnore]
+    [ForeignKey(nameof(ToUserId))]
     public User ToUser { get; set; } = null!;
 }
 
-
-/// Represents a user suggested as a potential match, stored in a queue.
-/// Uses a composite key (UserId, SuggestedUserId).
-
 public class UserSuggestionQueue
 {
-    // Composite Key Part 1: The ID of the user whose queue this item belongs to
-    [Key, Column(Order = 0)]
     public int UserId { get; set; }
-
-    // Composite Key Part 2: The ID of the user being suggested
-    [Key, Column(Order = 1)]
     public int SuggestedUserId { get; set; }
-
     public double CompatibilityScore { get; set; }
     public int QueuePosition { get; set; }
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 
-    // Navigation Properties
     [JsonIgnore]
+    [ForeignKey(nameof(UserId))]
     public User User { get; set; } = null!;
 
     [JsonIgnore]
+    [ForeignKey(nameof(SuggestedUserId))]
     public User SuggestedUser { get; set; } = null!;
 }
 
@@ -178,29 +99,25 @@ public record SendLikeDto(int FromUserId, int ToUserId);
 
 public class MusicProfileDto
 {
-    public string FavoriteSongs { get; set; } = string.Empty;
-    public string FavoriteArtists { get; set; } = string.Empty;
-    public string FavoriteGenres { get; set; } = string.Empty;
+    public List<string> FavoriteGenres { get; set; } = new();
+    public List<string> FavoriteArtists { get; set; } = new();
+    public List<string> FavoriteSongs { get; set; } = new();
 }
 
 public class UserDto
 {
     public int Id { get; set; }
-    public string Name { get; set; } = string.Empty;
+    public string Name { get; set; } = "";
+    public string Email { get; set; } = "";
     public int Age { get; set; }
-    public string? Location { get; set; }
-    public string? Bio { get; set; }
-    public string? Gender { get; set; }
+    public string Location { get; set; } = "";
+    public string Bio { get; set; } = "";
+    public string Gender { get; set; } = "";
     public string? SexualOrientation { get; set; }
-    public string? GenderIdentity { get; set; }
-    public string? AttractionPreferences { get; set; }
-    public string? Email { get; set; }
-
-    public MusicProfileDto? MusicProfile { get; set; }
-
-    // List of Image URLs
-    public List<string> Images { get; set; } = new List<string>();
+    public MusicProfileDto MusicProfile { get; set; } = new();
+    public List<string> Images { get; set; } = new();
 }
+
 
 public class TakeExUsersResponse
 {
@@ -294,16 +211,15 @@ public static class DtoMappers
             Name = user.Name,
             Age = user.Age,
             Email = user.Email,
-            Location = user.Location,
-            Bio = user.Bio,
+            Location = user.Location!,
+            Bio = user.Bio!,
             Gender = user.Gender,
-            // FIX: Using the ImageUrl property
             Images = user.Images.Select(i => i.ImageUrl).ToList(),
             MusicProfile = user.MusicProfile != null ? new MusicProfileDto
             {
-                FavoriteArtists = user.MusicProfile.FavoriteArtists,
-                FavoriteGenres = user.MusicProfile.FavoriteGenres,
-                FavoriteSongs = user.MusicProfile.FavoriteSongs,
+                FavoriteArtists = user.MusicProfile.FavoriteArtists!,
+                FavoriteGenres = user.MusicProfile.FavoriteGenres!,
+                FavoriteSongs = user.MusicProfile.FavoriteSongs!,
             } : null
         };
     }
@@ -323,9 +239,9 @@ public static class Endpoints
             // Note: Email/Password fields are missing here, this is a simplified user creation.
             MusicProfile = new MusicProfile
             {
-                FavoriteGenres = dto.Genres,
-                FavoriteArtists = dto.Artists,
-                FavoriteSongs = dto.Songs
+                FavoriteGenres = dto.Genres.Split(',').ToList(),
+                FavoriteArtists = dto.Artists.Split(',').ToList(),
+                FavoriteSongs = dto.Songs.Split(',').ToList()
             }
         };
         db.Users.Add(user);
@@ -371,9 +287,9 @@ public static class Endpoints
         if (user == null) return Results.NotFound("User not found");
         if (user.MusicProfile == null) return Results.BadRequest("User has no music profile");
 
-        user.MusicProfile.FavoriteGenres = dto.Genres!;
-        user.MusicProfile.FavoriteArtists = dto.Artists!;
-        user.MusicProfile.FavoriteSongs = dto.Songs!;
+        user.MusicProfile.FavoriteGenres = dto.Genres!.Split(',').ToList();
+        user.MusicProfile.FavoriteArtists = dto.Artists!.Split(',').ToList();
+        user.MusicProfile.FavoriteSongs = dto.Songs!.Split(',').ToList();
 
         await db.SaveChangesAsync();
         return Results.Ok(user);

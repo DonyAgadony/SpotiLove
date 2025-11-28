@@ -511,18 +511,18 @@ public class SpotifyService
         {
             user.MusicProfile = new MusicProfile
             {
-                FavoriteSongs = string.Join(", ", songs),
-                FavoriteArtists = JsonSerializer.Serialize(artistsWithImages), // Store as JSON
-                // Storing genres as comma-separated list of slugs
-                FavoriteGenres = string.Join(",", genres),
+                FavoriteSongs = songs.ToList(),        // List<string>
+                FavoriteArtists = artistsWithImages.Select(a => a.Name).ToList(),
+                FavoriteGenres = genres.ToList()       // List<string>
             };
         }
         else
         {
-            user.MusicProfile.FavoriteSongs = string.Join(", ", songs);
-            user.MusicProfile.FavoriteArtists = JsonSerializer.Serialize(artistsWithImages); // Store as JSON
-            user.MusicProfile.FavoriteGenres = string.Join(",", genres);
+            user.MusicProfile.FavoriteSongs = songs.ToList();
+            user.MusicProfile.FavoriteArtists = artistsWithImages.Select(a => a.Name).ToList();
+            user.MusicProfile.FavoriteGenres = genres.ToList();
         }
+
 
         // 5. Save changes
         await db.SaveChangesAsync();
