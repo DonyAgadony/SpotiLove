@@ -318,6 +318,7 @@ app.MapPost("/users/{userId:int}/profile", async (
 })
 .WithName("UpdateUserMusicProfile")
 .WithSummary("Update user's music profile with artists, songs, and genres");
+
 app.MapGet("/users", async (AppDbContext db, [FromQuery] int? userId, [FromQuery] int? count) =>
 {
     try
@@ -550,6 +551,176 @@ app.MapGet("/users", async (AppDbContext db, [FromQuery] int? userId, [FromQuery
 .WithName("GetUsersForSwipe")
 .WithSummary("Get personalized user suggestions with smart caching")
 .WithDescription("Requires ?userId={id} and optional &count={1–50} for results.");
+// Add this endpoint to Program.cs for quick database population
+// Place this AFTER your other endpoints but BEFORE app.Run()
+
+app.MapPost("/dev/populate-users", async (AppDbContext db, int count = 50) =>
+{
+    try
+    {
+        Console.WriteLine($"🚀 Creating {count} temporary users...");
+
+        var random = new Random();
+        var names = new[] { "Alex", "Jordan", "Taylor", "Morgan", "Casey", "Riley", "Avery", "Quinn", "Sam", "Drew" };
+        var surnames = new[] { "Smith", "Johnson", "Williams", "Brown", "Jones", "Garcia", "Miller", "Davis", "Rodriguez", "Martinez" };
+        var genres = new[] { "Pop", "Rock", "Hip Hop", "Jazz", "Electronic", "Classical", "Metal", "R&B", "Indie", "Country", "Latin", "K-Pop", "Soul", "Punk", "Reggae" };
+        var artists = new[] {
+            "Taylor Swift", "Drake", "Arctic Monkeys", "Beyoncé", "Eminem",
+            "Daft Punk", "Bad Bunny", "The Weeknd", "Billie Eilish", "Post Malone",
+            "Ed Sheeran", "Ariana Grande", "Bruno Mars", "Adele", "Coldplay",
+            "Imagine Dragons", "Twenty One Pilots", "Kanye West", "Travis Scott", "SZA"
+        };
+        var songs = new[] {
+            "Anti-Hero", "Blinding Lights", "Do I Wanna Know", "One More Time",
+            "HUMBLE.", "Enter Sandman", "Creep", "Everlong", "Bohemian Rhapsody",
+            "Smells Like Teen Spirit", "Sweet Child O' Mine", "Stairway to Heaven",
+            "Hotel California", "Imagine", "Hey Jude", "Purple Rain", "Billie Jean"
+        };
+        var locations = new[] {
+            "New York, NY", "Los Angeles, CA", "Austin, TX", "Seattle, WA",
+            "Miami, FL", "Chicago, IL", "London, UK", "Berlin, DE", "Paris, FR",
+            "Tel Aviv, IL", "Tokyo, JP", "Sydney, AU", "Toronto, CA", "Barcelona, ES"
+        };
+        var bios = new[] {
+            "Music is my life 🎵",
+            "Looking for someone who shares my taste in music",
+            "Concert buddy wanted!",
+            "Vinyl collector and coffee enthusiast ☕",
+            "Let's make a playlist together",
+            "Music festival addict 🎪",
+            "Always discovering new artists",
+            "Live music > recorded music",
+            "Spotify wrapped champion 🏆",
+            "My headphones are my best friend"
+        };
+
+        var users = new List<User>();
+        var hasher = new PasswordHasher<User>();
+
+        for (int i = 0; i < count; i++)
+        {
+            var firstName = names[random.Next(names.Length)];
+            var lastName = surnames[random.Next(surnames.Length)];
+            var name = $"{firstName} {lastName}";
+            var email = $"{firstName.ToLower()}.{lastName.ToLower()}{random.Next(1000, 9999)}@temp.com";
+
+            // Generate random music preferences as COMMA-SEPARATED STRINGS
+            var favoriteGenres = string.Join(", ", genres.OrderBy(_ => random.Next()).Take(random.Next(3, 6)));
+            var favoriteArtists = string.Join(", ", artists.OrderBy(_ => random.Next()).Take(random.Next(5, 10)));
+            var favoriteSongs = string.Join(", ", songs.OrderBy(_ => random.Next()).Take(random.Next(5, 10)));
+
+            var user = new User
+            {
+                Name = name,
+                Email = email,
+                Age = random.Next(18, 45),
+                Gender = random.Next(2) == 0 ? "Male" : "Female",
+                Location = locations[random.Next(locations.Length)],
+                Bio = bios[random.Next(bios.Length)],
+                PasswordHash = hasher.HashPassword(null!, "TempPass123!"),
+                CreatedAt = DateTime.UtcNow,
+                LastLoginAt = DateTime.UtcNow.AddDays(-random.Next(0, 30)),
+                MusicProfile = new MusicProfile
+                {
+                    FavoriteGenres = favoriteGenres,
+                    FavoriteArtists = favoriteArtists,
+                    FavoriteSongs = favoriteSongs
+                }
+            };
+
+            users.Add(user);
+        }
+
+        await db.Users.AddRangeAsync(users);
+        await db.SaveChangesAsync();
+
+        // Add images for each user
+        var userImages = new List<UserImage>();
+        foreach (var user in users)
+        {
+            var imageCount = random.Next(1, 5); // 1-4 images per user
+            for (int i = 1; i <= imageCount; i++)
+            {
+                userImages.Add(new UserImage
+                {
+                    UserId = user.Id,
+                    ImageUrl = $"https://i.pravatar.cc/400?img={random.Next(1, 70)}"
+                });
+            }
+        }
+
+        await db.UserImages.AddRangeAsync(userImages);
+        await db.SaveChangesAsync();
+
+        var totalUsers = await db.Users.CountAsync();
+
+        return Results.Ok(new
+        {
+            success = true,
+            message = $"Successfully created {count} temporary users",
+            createdCount = count,
+            totalUsers = totalUsers,
+            sampleUsers = users.Take(5).Select(u => new
+            {
+                u.Id,
+                u.Name,
+                u.Email,
+                u.Age,
+                u.Location,
+                // CORRECT:
+                MusicProfile = new
+                {
+                    Genres = u.MusicProfile?.FavoriteGenres?.Split(", ", StringSplitOptions.RemoveEmptyEntries).Take(3).ToList() ?? new List<string>(),
+                    Artists = u.MusicProfile?.FavoriteArtists?.Split(", ", StringSplitOptions.RemoveEmptyEntries).Take(3).ToList() ?? new List<string>()
+                }
+            })
+        });
+    }
+    catch (Exception ex)
+    {
+        Console.WriteLine($"❌ Error creating users: {ex.Message}\n{ex.StackTrace}");
+        return Results.Problem(
+            detail: ex.Message,
+            title: "Failed to create users",
+            statusCode: 500
+        );
+    }
+})
+.WithName("PopulateTestUsers")
+.WithSummary("Create temporary test users (Development only)")
+.WithDescription("Creates N test users with random profiles. Default: 50 users. Usage: POST /dev/populate-users?count=100");
+
+// Clear all users (use with caution!)
+app.MapDelete("/dev/clear-users", async (AppDbContext db) =>
+{
+    try
+    {
+        var userCount = await db.Users.CountAsync();
+
+        // Clear all related data in the correct order (respecting foreign keys)
+        db.UserSuggestionQueues.RemoveRange(db.UserSuggestionQueues);
+        db.Likes.RemoveRange(db.Likes);
+        db.UserImages.RemoveRange(db.UserImages);
+        db.MusicProfiles.RemoveRange(db.MusicProfiles);
+        db.Users.RemoveRange(db.Users);
+
+        await db.SaveChangesAsync();
+
+        return Results.Ok(new
+        {
+            success = true,
+            message = $"Cleared {userCount} users and all related data",
+            deletedCount = userCount
+        });
+    }
+    catch (Exception ex)
+    {
+        return Results.Problem(detail: ex.Message, title: "Failed to clear users");
+    }
+})
+.WithName("ClearAllUsers")
+.WithSummary("⚠️ DELETE all users (Development only)")
+.WithDescription("Removes ALL users and related data from database. Use with extreme caution!");
 // ---- Music Profile ----
 app.MapPost("/users/{id:int}/music-profile", async (AppDbContext db, int id, MusicProfileDto dto) =>
 {
@@ -1332,12 +1503,12 @@ app.MapPost("/auth/login", async (
 
 // ---- User Management Endpoints ----
 app.MapPost("/users", Endpoints.CreateUser);
-app.MapGet("/users/{id:int}", Endpoints.GetUser);
-app.MapPut("/users/{id:int}/profile", Endpoints.UpdateProfile);
+app.MapGet("/users/{id:guid}", Endpoints.GetUser);
+app.MapPut("/users/{id:guid}/profile", Endpoints.UpdateProfile);
 app.MapGet("/users:search", Endpoints.SearchUsers);
 
 // ---- User Images Endpoints ----
-app.MapPost("/users/{id:int}/images", Endpoints.AddUserImage);
+app.MapPost("/users/{id:guid}/images", Endpoints.AddUserImage);
 app.MapGet("/users/{id:int}/images", Endpoints.GetUserImages);
 
 // ---- Swiping Endpoints ----

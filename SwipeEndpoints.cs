@@ -77,7 +77,7 @@ public static class SwipeEndpoints
     /// <summary>
     /// Get swipe statistics for a user
     /// </summary>
-    public static async Task<IResult> GetSwipeStats(SwipeService swipeService, int userId)
+    public static Task<IResult> GetSwipeStats(SwipeService swipeService, int userId)
     {
         try
         {
@@ -91,11 +91,11 @@ public static class SwipeEndpoints
                 LikeRate = 0.0
             };
 
-            return Results.Ok(stats);
+            return Task.FromResult(Results.Ok(stats));
         }
         catch (Exception ex)
         {
-            return Results.Problem(detail: ex.Message, title: "Error fetching swipe stats");
+            return Task.FromResult(Results.Problem(detail: ex.Message, title: "Error fetching swipe stats"));
         }
     }
 
@@ -117,6 +117,3 @@ public static class SwipeEndpoints
         return await SwipeOnUser(swipeService, swipeDto);
     }
 }
-
-// DTO for swipe actions
-public record SwipeDto(int FromUserId, int ToUserId, bool IsLike);

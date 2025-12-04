@@ -7,7 +7,8 @@ namespace Spotilove;
 
 public class User
 {
-    public int Id { get; set; }
+    [Key]
+    public Guid Id { get; set; } = Guid.NewGuid();
     public string Name { get; set; } = string.Empty;
     public int Age { get; set; }
     public string Gender { get; set; } = string.Empty;
@@ -29,8 +30,11 @@ public class User
 
 public class MusicProfile
 {
-    public int Id { get; set; }
-    public int UserId { get; set; }
+    [Key]
+    public Guid Id { get; set; } = Guid.NewGuid();
+
+    [Required]
+    public Guid UserId { get; set; }
     public List<string> FavoriteGenres { get; set; } = new();
     public List<string> FavoriteArtists { get; set; } = new();
     public List<string> FavoriteSongs { get; set; } = new();
@@ -42,8 +46,11 @@ public class MusicProfile
 
 public class UserImage
 {
-    public int Id { get; set; }
-    public int UserId { get; set; }
+    [Key]
+    public Guid Id { get; set; } = Guid.NewGuid();
+
+    [Required]
+    public Guid UserId { get; set; }
     public string ImageUrl { get; set; } = string.Empty;
 
     [NotMapped]
@@ -60,8 +67,11 @@ public class UserImage
 
 public class Like
 {
-    public int FromUserId { get; set; }
-    public int ToUserId { get; set; }
+    [Key, Column(Order = 0)]
+    public Guid FromUserId { get; set; }
+
+    [Key, Column(Order = 1)]
+    public Guid ToUserId { get; set; }
     public bool IsLike { get; set; }
     public bool IsMatch { get; set; } = false;
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
@@ -77,8 +87,11 @@ public class Like
 
 public class UserSuggestionQueue
 {
-    public int UserId { get; set; }
-    public int SuggestedUserId { get; set; }
+    [Key, Column(Order = 0)]
+    public Guid UserId { get; set; }
+
+    [Key, Column(Order = 1)]
+    public Guid SuggestedUserId { get; set; }
     public double CompatibilityScore { get; set; }
     public int QueuePosition { get; set; }
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
@@ -95,8 +108,6 @@ public class UserSuggestionQueue
 // =======================================================
 // ===== DTOs (Data Transfer Objects) and Requests =======
 // =======================================================
-public record SendLikeDto(int FromUserId, int ToUserId);
-
 public class MusicProfileDto
 {
     public List<string> FavoriteGenres { get; set; } = new();
@@ -106,7 +117,7 @@ public class MusicProfileDto
 
 public class UserDto
 {
-    public int Id { get; set; }
+    public Guid Id { get; set; }
     public string Name { get; set; } = "";
     public string Email { get; set; } = "";
     public int Age { get; set; }
@@ -181,14 +192,15 @@ public record CreateUserDto(
 // Changed to nullable strings for partial updates
 public record UpdateProfileDto(string? Genres, string? Artists, string? Songs);
 
+public record SwipeDto(Guid FromUserId, Guid ToUserId, bool IsLike);
+
+public record SendLikeDto(Guid FromUserId, Guid ToUserId);
 public record LikeDto(int FromUserId, int ToUserId, bool IsLike);
 
-// FIX: Added missing DTO for batch processing service
 public record BatchCalculateRequest(
-    int UserId,
-    List<int> TargetUserIds
+    Guid UserId,
+    List<Guid> TargetUserIds
 );
-
 public class ResponseMessage
 {
     public bool Success { get; set; }
@@ -263,7 +275,7 @@ public static class Endpoints
 
     /// Gets a user profile by ID.
 
-    public static async Task<IResult> GetUser(AppDbContext db, int id)
+    public static async Task<IResult> GetUser(AppDbContext db, Guid id)
     {
         var user = await db.Users
             .Include(u => u.MusicProfile)
@@ -278,7 +290,7 @@ public static class Endpoints
 
     /// Updates only the music profile fields.
 
-    public static async Task<IResult> UpdateProfile(AppDbContext db, int id, UpdateProfileDto dto)
+    public static async Task<IResult> UpdateProfile(AppDbContext db, Guid id, UpdateProfileDto dto)
     {
         var user = await db.Users
             .Include(u => u.MusicProfile)
