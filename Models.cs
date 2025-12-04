@@ -223,16 +223,17 @@ public static class DtoMappers
             Name = user.Name,
             Age = user.Age,
             Email = user.Email,
-            Location = user.Location!,
-            Bio = user.Bio!,
+            Location = user.Location ?? "",
+            Bio = user.Bio ?? "",
             Gender = user.Gender,
+            SexualOrientation = user.SexualOrientation,
             Images = user.Images.Select(i => i.ImageUrl).ToList(),
             MusicProfile = user.MusicProfile != null ? new MusicProfileDto
             {
-                FavoriteArtists = user.MusicProfile.FavoriteArtists!,
-                FavoriteGenres = user.MusicProfile.FavoriteGenres!,
-                FavoriteSongs = user.MusicProfile.FavoriteSongs!,
-            } : null
+                FavoriteArtists = user.MusicProfile.FavoriteArtists ?? new List<string>(),
+                FavoriteGenres = user.MusicProfile.FavoriteGenres ?? new List<string>(),
+                FavoriteSongs = user.MusicProfile.FavoriteSongs ?? new List<string>(),
+            } : new MusicProfileDto()
         };
     }
 }
@@ -248,12 +249,13 @@ public static class Endpoints
             Name = dto.Name,
             Age = dto.Age,
             Gender = dto.Gender,
-            // Note: Email/Password fields are missing here, this is a simplified user creation.
+            Email = dto.Email,
+            PasswordHash = PasswordHasher.HashPassword(dto.Password),
             MusicProfile = new MusicProfile
             {
-                FavoriteGenres = dto.Genres.Split(',').ToList(),
-                FavoriteArtists = dto.Artists.Split(',').ToList(),
-                FavoriteSongs = dto.Songs.Split(',').ToList()
+                FavoriteGenres = dto.Genres.Split(',').Select(g => g.Trim()).ToList(),
+                FavoriteArtists = dto.Artists.Split(',').Select(a => a.Trim()).ToList(),
+                FavoriteSongs = dto.Songs.Split(',').Select(s => s.Trim()).ToList()
             }
         };
         db.Users.Add(user);
@@ -263,16 +265,15 @@ public static class Endpoints
             Id = user.Id,
             Name = user.Name,
             Age = user.Age,
+            Email = user.Email,
             MusicProfile = user.MusicProfile != null ? new MusicProfileDto
             {
                 FavoriteArtists = user.MusicProfile.FavoriteArtists,
                 FavoriteGenres = user.MusicProfile.FavoriteGenres,
                 FavoriteSongs = user.MusicProfile.FavoriteSongs,
-            } : null
+            } : new MusicProfileDto()
         });
     }
-
-
     /// Gets a user profile by ID.
 
     public static async Task<IResult> GetUser(AppDbContext db, Guid id)
@@ -284,12 +285,10 @@ public static class Endpoints
             .FirstOrDefaultAsync(u => u.Id == id);
 
         if (user == null) return Results.NotFound("User not found");
-        return Results.Ok(user); // Returning the full entity for simplicity
+        return Results.Ok(user);
     }
 
-
-    /// Updates only the music profile fields.
-
+    // Updates only the music profile fields.
     public static async Task<IResult> UpdateProfile(AppDbContext db, Guid id, UpdateProfileDto dto)
     {
         var user = await db.Users
@@ -297,11 +296,24 @@ public static class Endpoints
             .FirstOrDefaultAsync(u => u.Id == id);
 
         if (user == null) return Results.NotFound("User not found");
-        if (user.MusicProfile == null) return Results.BadRequest("User has no music profile");
 
-        user.MusicProfile.FavoriteGenres = dto.Genres!.Split(',').ToList();
-        user.MusicProfile.FavoriteArtists = dto.Artists!.Split(',').ToList();
-        user.MusicProfile.FavoriteSongs = dto.Songs!.Split(',').ToList();
+        if (user.MusicProfile == null)
+        {
+            user.MusicProfile = new MusicProfile
+            {
+                UserId = id,
+                FavoriteGenres = new List<string>(),
+                FavoriteArtists = new List<string>(),
+                FavoriteSongs = new List<string>()
+            };
+        }
+
+        if (dto.Genres != null)
+            user.MusicProfile.FavoriteGenres = dto.Genres.Split(',').Select(g => g.Trim()).ToList();
+        if (dto.Artists != null)
+            user.MusicProfile.FavoriteArtists = dto.Artists.Split(',').Select(a => a.Trim()).ToList();
+        if (dto.Songs != null)
+            user.MusicProfile.FavoriteSongs = dto.Songs.Split(',').Select(s => s.Trim()).ToList();
 
         await db.SaveChangesAsync();
         return Results.Ok(user);
@@ -321,16 +333,14 @@ public static class Endpoints
         return Results.Ok(users);
     }
 
-
     /// Adds a new image URL to a user's profile.
 
-    public static async Task<IResult> AddUserImage(AppDbContext db, int id, UserImage image)
+    public static async Task<IResult> AddUserImage(AppDbContext db, Guid id, UserImage image)
     {
         var user = await db.Users.FirstOrDefaultAsync(u => u.Id == id);
         if (user == null) return Results.NotFound("User not found");
 
         image.UserId = id;
-        // Using the ImageUrl property from the input DTO/Entity provided by the user
         if (string.IsNullOrEmpty(image.Url) && !string.IsNullOrEmpty(image.ImageUrl))
         {
             image.Url = image.ImageUrl;
@@ -342,10 +352,9 @@ public static class Endpoints
         return Results.Ok(image);
     }
 
-
     /// Gets all images for a specific user.
 
-    public static async Task<IResult> GetUserImages(AppDbContext db, int id)
+    public static async Task<IResult> GetUserImages(AppDbContext db, Guid id)
     {
         var user = await db.Users
             .Include(u => u.Images)

@@ -259,9 +259,9 @@ app.MapGet("/spotify/genres-from-artists", async (SpotifyService spotifyService,
 .WithSummary("Get genres based on selected artists");
 
 // Update user music profile
-app.MapPost("/users/{userId:int}/profile", async (
+app.MapPost("/users/{userId:guid}/profile", async (
     AppDbContext db,
-    int userId,
+    Guid userId,
     UpdateMusicProfileRequest request) =>
 {
     try
@@ -278,17 +278,17 @@ app.MapPost("/users/{userId:int}/profile", async (
             user.MusicProfile = new MusicProfile
             {
                 UserId = userId,
-                FavoriteArtists = request.Artists.Split(',').ToList(),
-                FavoriteSongs = request.Songs.Split(',').ToList(),
-                FavoriteGenres = request.Genres.Split(',').ToList()
+                FavoriteArtists = request.Artists.Split(',').Select(a => a.Trim()).ToList(),
+                FavoriteSongs = request.Songs.Split(',').Select(s => s.Trim()).ToList(),
+                FavoriteGenres = request.Genres.Split(',').Select(g => g.Trim()).ToList()
             };
             db.MusicProfiles.Add(user.MusicProfile);
         }
         else
         {
-            user.MusicProfile.FavoriteArtists = request.Artists.Split(',').ToList();
-            user.MusicProfile.FavoriteSongs = request.Songs.Split(',').ToList();
-            user.MusicProfile.FavoriteGenres = request.Genres.Split(',').ToList();
+            user.MusicProfile.FavoriteArtists = request.Artists.Split(',').Select(a => a.Trim()).ToList();
+            user.MusicProfile.FavoriteSongs = request.Songs.Split(',').Select(s => s.Trim()).ToList();
+            user.MusicProfile.FavoriteGenres = request.Genres.Split(',').Select(g => g.Trim()).ToList();
         }
 
         await db.SaveChangesAsync();
@@ -315,16 +315,13 @@ app.MapPost("/users/{userId:int}/profile", async (
         Console.WriteLine($"❌ Error updating music profile: {ex.Message}");
         return Results.Problem(detail: ex.Message, title: "Failed to update music profile");
     }
-})
-.WithName("UpdateUserMusicProfile")
-.WithSummary("Update user's music profile with artists, songs, and genres");
-
-app.MapGet("/users", async (AppDbContext db, [FromQuery] int? userId, [FromQuery] int? count) =>
+});
+app.MapGet("/users", async (AppDbContext db, [FromQuery] Guid? userId, [FromQuery] int? count) =>
 {
     try
     {
         // ✅ Validate required userId
-        if (userId == null || userId <= 0)
+        if (userId == null || userId == Guid.Empty)
         {
             return Results.BadRequest(new TakeExUsersResponse
             {
@@ -335,15 +332,14 @@ app.MapGet("/users", async (AppDbContext db, [FromQuery] int? userId, [FromQuery
             });
         }
 
-        int currentUserId = userId.Value;
+        Guid currentUserId = userId.Value;
         int requestedCount = Math.Clamp(count ?? 10, 1, 50);
 
         // 1️⃣ Load current user + profile
         var currentUser = await db.Users
-            .Include(u => u.MusicProfile)
-            .AsNoTracking()
-            .FirstOrDefaultAsync(u => u.Id == currentUserId);
-
+             .Include(u => u.MusicProfile)
+             .AsNoTracking()
+             .FirstOrDefaultAsync(u => u.Id == currentUserId);
         System.Console.WriteLine(currentUser?.MusicProfile);
 
         if (currentUser?.MusicProfile == null)
@@ -553,7 +549,6 @@ app.MapGet("/users", async (AppDbContext db, [FromQuery] int? userId, [FromQuery
 .WithDescription("Requires ?userId={id} and optional &count={1–50} for results.");
 // Add this endpoint to Program.cs for quick database population
 // Place this AFTER your other endpoints but BEFORE app.Run()
-
 app.MapPost("/dev/populate-users", async (AppDbContext db, int count = 50) =>
 {
     try
@@ -604,10 +599,10 @@ app.MapPost("/dev/populate-users", async (AppDbContext db, int count = 50) =>
             var name = $"{firstName} {lastName}";
             var email = $"{firstName.ToLower()}.{lastName.ToLower()}{random.Next(1000, 9999)}@temp.com";
 
-            // Generate random music preferences as COMMA-SEPARATED STRINGS
-            var favoriteGenres = string.Join(", ", genres.OrderBy(_ => random.Next()).Take(random.Next(3, 6)));
-            var favoriteArtists = string.Join(", ", artists.OrderBy(_ => random.Next()).Take(random.Next(5, 10)));
-            var favoriteSongs = string.Join(", ", songs.OrderBy(_ => random.Next()).Take(random.Next(5, 10)));
+            // ✅ FIX: Create List<string> directly, not comma-separated string
+            var favoriteGenres = genres.OrderBy(_ => random.Next()).Take(random.Next(3, 6)).ToList();
+            var favoriteArtists = artists.OrderBy(_ => random.Next()).Take(random.Next(5, 10)).ToList();
+            var favoriteSongs = songs.OrderBy(_ => random.Next()).Take(random.Next(5, 10)).ToList();
 
             var user = new User
             {
@@ -667,11 +662,10 @@ app.MapPost("/dev/populate-users", async (AppDbContext db, int count = 50) =>
                 u.Email,
                 u.Age,
                 u.Location,
-                // CORRECT:
                 MusicProfile = new
                 {
-                    Genres = u.MusicProfile?.FavoriteGenres?.Split(", ", StringSplitOptions.RemoveEmptyEntries).Take(3).ToList() ?? new List<string>(),
-                    Artists = u.MusicProfile?.FavoriteArtists?.Split(", ", StringSplitOptions.RemoveEmptyEntries).Take(3).ToList() ?? new List<string>()
+                    Genres = u.MusicProfile?.FavoriteGenres?.Take(3).ToList() ?? new List<string>(),
+                    Artists = u.MusicProfile?.FavoriteArtists?.Take(3).ToList() ?? new List<string>()
                 }
             })
         });
@@ -722,7 +716,7 @@ app.MapDelete("/dev/clear-users", async (AppDbContext db) =>
 .WithSummary("⚠️ DELETE all users (Development only)")
 .WithDescription("Removes ALL users and related data from database. Use with extreme caution!");
 // ---- Music Profile ----
-app.MapPost("/users/{id:int}/music-profile", async (AppDbContext db, int id, MusicProfileDto dto) =>
+app.MapPost("/users/{id:guid}/music-profile", async (AppDbContext db, Guid id, MusicProfileDto dto) =>
 {
     var user = await db.Users
         .Include(u => u.MusicProfile)
@@ -847,7 +841,7 @@ static double JaccardSimilarity(List<string>? list1, List<string>? list2)
     return union == 0 ? 0 : (double)intersection / union * 100;
 }
 
-static async Task UpdateQueueScoresInBackground(int userId, List<int> suggestedUserIds)
+static async Task UpdateQueueScoresInBackground(Guid userId, List<Guid> suggestedUserIds)
 {
     try
     {
@@ -955,58 +949,54 @@ static string BuildNpgsqlConnectionString(string databaseUrl)
         SslMode = Npgsql.SslMode.Require,
     }.ConnectionString;
 }
-app.MapGet("/debug/user/{userId:int}", async (AppDbContext db, int userId) =>
+app.MapGet("/debug/user/{userId:guid}", async (AppDbContext db, Guid userId) =>
+{
+    try
+    {
+        var user = await db.Users
+            .Include(u => u.MusicProfile)
+            .Include(u => u.Images)
+            .FirstOrDefaultAsync(u => u.Id == userId);
+
+        if (user == null)
         {
-            try
+            return Results.NotFound(new
             {
-                var user = await db.Users
-                    .Include(u => u.MusicProfile)
-                    .Include(u => u.Images)
-                    .FirstOrDefaultAsync(u => u.Id == userId);
+                success = false,
+                message = $"User {userId} not found"
+            });
+        }
 
-                if (user == null)
-                {
-                    return Results.NotFound(new
-                    {
-                        success = false,
-                        message = $"User {userId} not found"
-                    });
-                }
-
-                return Results.Ok(new
-                {
-                    success = true,
-                    userId = user.Id,
-                    name = user.Name,
-                    email = user.Email,
-                    hasMusicProfile = user.MusicProfile != null,
-                    musicProfile = user.MusicProfile != null ? new
-                    {
-                        id = user.MusicProfile.Id,
-                        genres = user.MusicProfile.FavoriteGenres,
-                        artists = user.MusicProfile.FavoriteArtists,
-                        songs = user.MusicProfile.FavoriteSongs,
-                        isEmpty = (user.MusicProfile.FavoriteGenres == null || user.MusicProfile.FavoriteGenres.All(string.IsNullOrWhiteSpace)) &&
-                                  (user.MusicProfile.FavoriteArtists == null || user.MusicProfile.FavoriteArtists.All(string.IsNullOrWhiteSpace)) &&
-                                  (user.MusicProfile.FavoriteSongs == null || user.MusicProfile.FavoriteSongs.All(string.IsNullOrWhiteSpace))
-
-                    } : null,
-                    imageCount = user.Images.Count
-                });
-            }
-            catch (Exception ex)
+        return Results.Ok(new
+        {
+            success = true,
+            userId = user.Id,
+            name = user.Name,
+            email = user.Email,
+            hasMusicProfile = user.MusicProfile != null,
+            musicProfile = user.MusicProfile != null ? new
             {
-                return Results.Problem(
-                    detail: ex.Message,
-                    title: "Debug endpoint failed",
-                    statusCode: 500
-                );
-            }
-        })
-        .WithName("DebugUserProfile")
-        .WithSummary("Debug: Check if a user has a music profile and view its contents");
+                id = user.MusicProfile.Id,
+                genres = user.MusicProfile.FavoriteGenres,
+                artists = user.MusicProfile.FavoriteArtists,
+                songs = user.MusicProfile.FavoriteSongs,
+                isEmpty = (user.MusicProfile.FavoriteGenres == null || user.MusicProfile.FavoriteGenres.All(string.IsNullOrWhiteSpace)) &&
+                          (user.MusicProfile.FavoriteArtists == null || user.MusicProfile.FavoriteArtists.All(string.IsNullOrWhiteSpace)) &&
+                          (user.MusicProfile.FavoriteSongs == null || user.MusicProfile.FavoriteSongs.All(string.IsNullOrWhiteSpace))
 
-
+            } : null,
+            imageCount = user.Images.Count
+        });
+    }
+    catch (Exception ex)
+    {
+        return Results.Problem(
+            detail: ex.Message,
+            title: "Debug endpoint failed",
+            statusCode: 500
+        );
+    }
+});
 // 1. Login trigger
 app.MapGet("/login", (SpotifyService spotify) =>
 {
@@ -1397,8 +1387,7 @@ app.MapPost("/auth/register", async (
         var saveResult = await db.SaveChangesAsync();
         Console.WriteLine($"✅ SaveChanges returned: {saveResult} changes");
         Console.WriteLine($"✅ User ID assigned: {user.Id}");
-
-        if (user.Id <= 0)
+        if (user.Id == Guid.Empty)
         {
             Console.WriteLine("❌ User ID was not assigned properly!");
             return Results.Problem("Failed to create user - ID not assigned");
@@ -1508,17 +1497,15 @@ app.MapPut("/users/{id:guid}/profile", Endpoints.UpdateProfile);
 app.MapGet("/users:search", Endpoints.SearchUsers);
 
 // ---- User Images Endpoints ----
+app.MapGet("/users/{id:guid}/images", Endpoints.GetUserImages);
 app.MapPost("/users/{id:guid}/images", Endpoints.AddUserImage);
-app.MapGet("/users/{id:int}/images", Endpoints.GetUserImages);
 
 // ---- Swiping Endpoints ----
-app.MapGet("/swipe/discover/{userId:int}", SwipeEndpoints.GetPotentialMatches);
-app.MapPost("/swipe", SwipeEndpoints.SwipeOnUser);
-app.MapPost("/swipe/{fromUserId:int}/like/{toUserId:int}", SwipeEndpoints.LikeUser);
-app.MapPost("/swipe/{fromUserId:int}/pass/{toUserId:int}", SwipeEndpoints.PassUser);
-app.MapGet("/matches/{userId:int}", SwipeEndpoints.GetUserMatches);
-app.MapGet("/swipe/stats/{userId:int}", SwipeEndpoints.GetSwipeStats);
-
+app.MapGet("/swipe/discover/{userId:guid}", SwipeEndpoints.GetPotentialMatches);
+app.MapPost("/swipe/{fromUserId:guid}/like/{toUserId:guid}", SwipeEndpoints.LikeUser);
+app.MapPost("/swipe/{fromUserId:guid}/pass/{toUserId:guid}", SwipeEndpoints.PassUser);
+app.MapGet("/matches/{userId:guid}", SwipeEndpoints.GetUserMatches);
+app.MapGet("/swipe/stats/{userId:guid}", SwipeEndpoints.GetSwipeStats);
 
 Console.WriteLine("🎯 Spotilove API is starting...");
 Console.WriteLine($"🌐 Running on port: {port}");

@@ -11,10 +11,7 @@ public class SwipeService
         _db = db;
     }
 
-    /// <summary>
-    /// Handles a swipe (like/dislike) from one user to another
-    /// </summary>
-    public async Task<ResponseMessage> SwipeAsync(int fromUserId, int toUserId, bool isLike)
+    public async Task<ResponseMessage> SwipeAsync(Guid fromUserId, Guid toUserId, bool isLike)
     {
         if (fromUserId == toUserId)
             throw new ArgumentException("Cannot swipe on yourself");
@@ -54,10 +51,7 @@ public class SwipeService
         return new ResponseMessage { Success = true };
     }
 
-    /// <summary>
-    /// Get potential matches for a user based on the suggestion queue
-    /// </summary>
-    public async Task<List<UserDto>> GetPotentialMatchesAsync(int userId, int count = 10)
+    public async Task<List<UserDto>> GetPotentialMatchesAsync(Guid userId, int count = 10)
     {
         var queueItems = await _db.UserSuggestionQueues
             .Where(q => q.UserId == userId)
@@ -78,22 +72,19 @@ public class SwipeService
             Id = u.Id,
             Name = u.Name,
             Age = u.Age,
-            Location = u.Location!,
-            Bio = u.Bio!,
-            MusicProfile = u.MusicProfile! != null ? new MusicProfileDto
+            Location = u.Location ?? "",
+            Bio = u.Bio ?? "",
+            MusicProfile = u.MusicProfile != null ? new MusicProfileDto
             {
                 FavoriteArtists = u.MusicProfile.FavoriteArtists,
                 FavoriteGenres = u.MusicProfile.FavoriteGenres,
                 FavoriteSongs = u.MusicProfile.FavoriteSongs
-            } : null,
+            } : new MusicProfileDto(),
             Images = u.Images.Select(i => i.ImageUrl ?? i.Url).ToList()
         }).ToList();
     }
 
-    /// <summary>
-    /// Optional: Get matches where both users liked each other
-    /// </summary>
-    public async Task<List<UserDto>> GetMatchesAsync(int userId)
+    public async Task<List<UserDto>> GetMatchesAsync(Guid userId)
     {
         var mutualLikes = await _db.Likes
             .Where(l => l.FromUserId == userId && l.IsLike)
@@ -116,14 +107,14 @@ public class SwipeService
             Id = u.Id,
             Name = u.Name,
             Age = u.Age,
-            Location = u.Location,
-            Bio = u.Bio,
+            Location = u.Location ?? "",
+            Bio = u.Bio ?? "",
             MusicProfile = u.MusicProfile != null ? new MusicProfileDto
             {
                 FavoriteArtists = u.MusicProfile.FavoriteArtists,
                 FavoriteGenres = u.MusicProfile.FavoriteGenres,
                 FavoriteSongs = u.MusicProfile.FavoriteSongs
-            } : null,
+            } : new MusicProfileDto(),
             Images = u.Images.Select(i => i.ImageUrl ?? i.Url).ToList()
         }).ToList();
     }

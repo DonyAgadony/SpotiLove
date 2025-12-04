@@ -4,10 +4,7 @@ namespace Spotilove;
 
 public static class SwipeEndpoints
 {
-    /// <summary>
-    /// Get potential matches for swiping
-    /// </summary>
-    public static async Task<IResult> GetPotentialMatches(SwipeService swipeService, int userId, int count = 10)
+    public static async Task<IResult> GetPotentialMatches(SwipeService swipeService, Guid userId, int count = 10)
     {
         try
         {
@@ -24,10 +21,6 @@ public static class SwipeEndpoints
             return Results.Problem(detail: ex.Message, title: "Error fetching potential matches");
         }
     }
-
-    /// <summary>
-    /// Handle swipe action (like = true, pass = false)
-    /// </summary>
     public static async Task<IResult> SwipeOnUser(SwipeService swipeService, SwipeDto swipeDto)
     {
         try
@@ -53,10 +46,7 @@ public static class SwipeEndpoints
         }
     }
 
-    /// <summary>
-    /// Get all matches for a user
-    /// </summary>
-    public static async Task<IResult> GetUserMatches(SwipeService swipeService, int userId)
+    public static async Task<IResult> GetUserMatches(SwipeService swipeService, Guid userId)
     {
         try
         {
@@ -73,11 +63,7 @@ public static class SwipeEndpoints
             return Results.Problem(detail: ex.Message, title: "Error fetching matches");
         }
     }
-
-    /// <summary>
-    /// Get swipe statistics for a user
-    /// </summary>
-    public static Task<IResult> GetSwipeStats(SwipeService swipeService, int userId)
+    public static Task<IResult> GetSwipeStats(SwipeService swipeService, Guid userId)
     {
         try
         {
@@ -99,19 +85,13 @@ public static class SwipeEndpoints
         }
     }
 
-    /// <summary>
-    /// Quick swipe like endpoint
-    /// </summary>
-    public static async Task<IResult> LikeUser(SwipeService swipeService, int fromUserId, int toUserId)
+    public static async Task<IResult> LikeUser(SwipeService swipeService, Guid fromUserId, Guid toUserId)
     {
         var swipeDto = new SwipeDto(fromUserId, toUserId, true);
         return await SwipeOnUser(swipeService, swipeDto);
     }
 
-    /// <summary>
-    /// Quick swipe pass endpoint
-    /// </summary>
-    public static async Task<IResult> PassUser(SwipeService swipeService, int fromUserId, int toUserId)
+    public static async Task<IResult> PassUser(SwipeService swipeService, Guid fromUserId, Guid toUserId)
     {
         var swipeDto = new SwipeDto(fromUserId, toUserId, false);
         return await SwipeOnUser(swipeService, swipeDto);

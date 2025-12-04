@@ -4,9 +4,9 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Microsoft.EntityFrameworkCore.ChangeTracking;
 
 namespace Spotilove;
-// =======================================================
+// ============================
 // ===== DATABASE CONTEXT =====
-// =======================================================
+// ============================
 public class AppDbContext : DbContext
 {
     public DbSet<User> Users { get; set; } = null!;
@@ -21,14 +21,12 @@ public class AppDbContext : DbContext
     {
         base.OnModelCreating(modelBuilder);
 
-        // ===== Composite Keys =====
         modelBuilder.Entity<Like>()
             .HasKey(l => new { l.FromUserId, l.ToUserId });
 
         modelBuilder.Entity<UserSuggestionQueue>()
             .HasKey(usq => new { usq.UserId, usq.SuggestedUserId });
 
-        // ===== Relationships =====
         modelBuilder.Entity<Like>()
             .HasOne(l => l.FromUser)
             .WithMany(u => u.LikesSent)
@@ -65,7 +63,6 @@ public class AppDbContext : DbContext
             .HasForeignKey(ui => ui.UserId)
             .OnDelete(DeleteBehavior.Cascade);
 
-        // ===== List<string> conversions for MusicProfile =====
         modelBuilder.Entity<MusicProfile>(entity =>
         {
             var converter = new ValueConverter<List<string>, string>(
@@ -74,7 +71,7 @@ public class AppDbContext : DbContext
             );
 
             var comparer = new ValueComparer<List<string>>(
-                (c1, c2) => c1.SequenceEqual(c2),
+                (c1, c2) => c1 != null && c2 != null && c1.SequenceEqual(c2),
                 c => c.Aggregate(0, (a, v) => HashCode.Combine(a, v.GetHashCode())),
                 c => c.ToList()
             );
@@ -85,6 +82,7 @@ public class AppDbContext : DbContext
         });
     }
 }
+
 public static class PasswordHasher
 {
     public static async Task<IResult> SendLike(AppDbContext db, SendLikeDto dto)
@@ -153,20 +151,21 @@ public static class PasswordHasher
             });
         }
     }
+
     private static UserDto ToUserDto(User user) => new()
     {
         Id = user.Id,
         Name = user.Name,
         Email = user.Email,
         Age = user.Age,
-        Location = user.Location,
-        Bio = user.Bio,
-        MusicProfile = new MusicProfileDto
+        Location = user.Location ?? "",
+        Bio = user.Bio ?? "",
+        MusicProfile = user.MusicProfile != null ? new MusicProfileDto
         {
-            FavoriteGenres = user.MusicProfile!.FavoriteGenres,
-            FavoriteArtists = user.MusicProfile.FavoriteArtists,
-            FavoriteSongs = user.MusicProfile.FavoriteSongs
-        },
+            FavoriteGenres = user.MusicProfile.FavoriteGenres ?? new List<string>(),
+            FavoriteArtists = user.MusicProfile.FavoriteArtists ?? new List<string>(),
+            FavoriteSongs = user.MusicProfile.FavoriteSongs ?? new List<string>()
+        } : new MusicProfileDto(),
         Images = user.Images.Select(i => i.ImageUrl ?? i.Url).ToList()
     };
 
@@ -180,17 +179,13 @@ public static class PasswordHasher
         return Convert.ToBase64String(hash);
     }
 
-    /// <summary>
     /// Verifies a plain text password against a stored hash.
-    /// </summary>
     public static bool VerifyPassword(string password, string hash)
     {
         return HashPassword(password) == hash;
     }
 
-    /// <summary>
     /// Creates a new user with initial auth details and music profile.
-    /// </summary>
     public static async Task<IResult> CreateUser(AppDbContext db, CreateUserDto dto)
     {
         // 1. Check for existing user
@@ -221,10 +216,8 @@ public static class PasswordHasher
         return Results.Created($"/users/{user.Id}", ToUserDto(user));
     }
 
-    /// <summary>
     /// Gets a user profile by ID, returning a clean DTO.
-    /// </summary>
-    public static async Task<IResult> GetUser(AppDbContext db, int id)
+    public static async Task<IResult> GetUser(AppDbContext db, Guid id)
     {
         var user = await db.Users
             .Include(u => u.MusicProfile)
@@ -238,10 +231,8 @@ public static class PasswordHasher
         return Results.Ok(ToUserDto(user));
     }
 
-    /// <summary>
-    /// Updates only the music profile fields.
-    /// </summary>
-    public static async Task<IResult> UpdateProfile(AppDbContext db, int id, UpdateProfileDto dto)
+    // Updates only the music profile fields.
+    public static async Task<IResult> UpdateProfile(AppDbContext db, Guid id, UpdateProfileDto dto)
     {
         var user = await db.Users
             .Include(u => u.MusicProfile)
@@ -268,9 +259,7 @@ public static class PasswordHasher
         return Results.Ok(ToUserDto(updatedUser));
     }
 
-    /// <summary>
     /// Returns a list of all users as DTOs.
-    /// </summary>
     public static async Task<IResult> SearchUsers(AppDbContext db)
     {
         var users = await db.Users
@@ -288,11 +277,8 @@ public static class PasswordHasher
             Users = userDtos
         });
     }
-
-    /// <summary>
     /// Adds a new image URL to a user's profile.
-    /// </summary>
-    public static async Task<IResult> AddUserImage(AppDbContext db, int id, UserImage image)
+    public static async Task<IResult> AddUserImage(AppDbContext db, Guid id, UserImage image)
     {
         var userExists = await db.Users.AnyAsync(u => u.Id == id);
         if (!userExists) return Results.NotFound(new ResponseMessage { Success = false, Message = "User not found" });
@@ -305,11 +291,8 @@ public static class PasswordHasher
 
         return Results.Created($"/users/{id}/images", new { image.Id, image.Url });
     }
-
-    /// <summary>
     /// Gets all images for a specific user.
-    /// </summary>
-    public static async Task<IResult> GetUserImages(AppDbContext db, int id)
+    public static async Task<IResult> GetUserImages(AppDbContext db, Guid id)
     {
         var images = await db.UserImages
             .Where(i => i.UserId == id)
@@ -321,4 +304,3 @@ public static class PasswordHasher
         return Results.Ok(images);
     }
 }
-
