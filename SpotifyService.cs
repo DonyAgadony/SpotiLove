@@ -475,7 +475,7 @@ public class SpotifyService
         return topTracks.Items?.Select(t => CreateSlug($"{t.Name}-by-{t.Artists.FirstOrDefault()?.Name}")).ToList() ?? new List<string>();
     }
 
-    public async Task<User> UpdateUserProfileInDb(AppDbContext db, int userId)
+    public async Task<User> UpdateUserProfileInDb(AppDbContext db, Guid userId)
     {
         if (_spotify == null) throw new Exception("User not connected to Spotify");
 

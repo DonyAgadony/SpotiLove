@@ -763,16 +763,16 @@ static UserDto ToUserDto(User user) => new()
     Name = user.Name,
     Email = user.Email,
     Age = user.Age,
-    Location = user.Location,
-    Bio = user.Bio,
+    Location = user.Location!,
+    Bio = user.Bio!,
     SexualOrientation = user.SexualOrientation,
     MusicProfile = user.MusicProfile != null ? new MusicProfileDto
     {
-        FavoriteGenres = user.MusicProfile.FavoriteGenres,
-        FavoriteArtists = user.MusicProfile.FavoriteArtists,
-        FavoriteSongs = user.MusicProfile.FavoriteSongs
+        FavoriteGenres = user.MusicProfile.FavoriteGenres!,
+        FavoriteArtists = user!.MusicProfile.FavoriteArtists,
+        FavoriteSongs = user.MusicProfile!.FavoriteSongs
     } : null,
-    Images = user.Images.Select(i => i.ImageUrl ?? i.Url).ToList()
+    Images = [.. user.Images.Select(i => i.ImageUrl ?? i.Url)]
 };
 static double CalculateLocalCompatibility(MusicProfile p1, MusicProfile p2, User u1, User u2)
 {
