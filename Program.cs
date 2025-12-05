@@ -1276,9 +1276,7 @@ app.MapGet("/callback", async (
 })
 .WithName("SpotifyCallback")
 .WithSummary("Handles Spotify OAuth callback for both login and signup");
-//Take 10 Example Users from DB
-// ---- NEW: Take 10 Example Users Endpoint ----
-// ---- NEW: Take Random Users & Compare Music Taste ----
+//Take n Example Users from DB
 app.MapGet("/takeExUsers", async (AppDbContext db, int count) =>
 {
     try
@@ -1339,10 +1337,6 @@ app.MapGet("/takeExUsers", async (AppDbContext db, int count) =>
 .WithSummary("Take N random users from the database")
 .WithDescription("Fetches N random users (with music profile and images) from the database for testing");
 
-//dislike Operation
-// app.MapGet("/dislikeUser", (AppDbContext db) => );
-// ---- NEW: Add Example Users Endpoint ----
-// ---- NEW: Add 100 Example Users Endpoint ----
 app.MapPost("/auth/register", async (
     RegisterRequest request,
     AppDbContext db,
@@ -1471,9 +1465,6 @@ app.MapPost("/auth/login", async (
     // Generate a fake token for now (replace with JWT later)
     var token = Guid.NewGuid().ToString();
 
-    // Optional: handle "RememberMe" if you want longer token lifetime
-    // (right now, it's just informational)
-
     return Results.Ok(new
     {
         success = true,
@@ -1506,21 +1497,6 @@ app.MapPost("/swipe/{fromUserId:guid}/like/{toUserId:guid}", SwipeEndpoints.Like
 app.MapPost("/swipe/{fromUserId:guid}/pass/{toUserId:guid}", SwipeEndpoints.PassUser);
 app.MapGet("/matches/{userId:guid}", SwipeEndpoints.GetUserMatches);
 app.MapGet("/swipe/stats/{userId:guid}", SwipeEndpoints.GetSwipeStats);
-
-Console.WriteLine("🎯 Spotilove API is starting...");
-Console.WriteLine($"🌐 Running on port: {port}");
-Console.WriteLine("🤖 Gemini AI compatibility calculation enabled");
-Console.WriteLine("⚙️  Make sure to set GeminiAPIKey environment variable for AI features");
-Console.WriteLine("🧪 Test endpoints available:");
-Console.WriteLine("   - POST /fix-user101");
-Console.WriteLine("   - POST /seed-database");
 Console.WriteLine($"📖 View API documentation at: http://localhost:{port}/swagger");
 
 app.Run();
-
-// DTO for music profile update
-public record UpdateMusicProfileRequest(
-    string Artists,
-    string Songs,
-    string Genres
-);

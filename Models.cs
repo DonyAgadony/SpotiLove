@@ -207,6 +207,11 @@ public class ResponseMessage
     public string? Message { get; set; }
 }
 
+public record UpdateMusicProfileRequest(
+    string Artists,
+    string Songs,
+    string Genres
+);
 // =======================================================
 // ===== DTO MAPPERS (To resolve CS8801 error in Database.cs) =====
 // =======================================================
