@@ -599,7 +599,6 @@ app.MapPost("/dev/populate-users", async (AppDbContext db, int count = 50) =>
             var name = $"{firstName} {lastName}";
             var email = $"{firstName.ToLower()}.{lastName.ToLower()}{random.Next(1000, 9999)}@temp.com";
 
-            // ✅ FIX: Create List<string> directly, not comma-separated string
             var favoriteGenres = genres.OrderBy(_ => random.Next()).Take(random.Next(3, 6)).ToList();
             var favoriteArtists = artists.OrderBy(_ => random.Next()).Take(random.Next(5, 10)).ToList();
             var favoriteSongs = songs.OrderBy(_ => random.Next()).Take(random.Next(5, 10)).ToList();
