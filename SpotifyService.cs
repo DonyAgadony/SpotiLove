@@ -477,54 +477,39 @@ public class SpotifyService
 
     public async Task<User> UpdateUserProfileInDb(AppDbContext db, Guid userId)
     {
-        if (_spotify == null) throw new Exception("User not connected to Spotify");
+        if (_spotify == null)
+            throw new Exception("User not connected to Spotify");
 
         // 1. Fetch data from Spotify
-        var profile = await GetUserProfileAsync();
-        var songs = await GetUserTopSongsAsync();
-        var artistsWithImages = await GetUserTopArtistsWithImagesAsync();
-        var genres = await GetUserTopGenresAsync();
+        var profile = await GetUserProfileAsync();                // Gets name + email
+        var topSongs = await GetUserTopSongsAsync();              // Musical taste
+        var topArtistsWithImages = await GetUserTopArtistsWithImagesAsync();
+        var topGenres = await GetUserTopGenresAsync();
 
-        // Use song slugs for slightly more robust song matching/storage
-        var songSlugs = await GetUserTopSongsSlugsAsync();
-
-
-        // 2. Load user and music profile from database (uses the models in Spotilove.cs)
+        // 2. Load DB user
         var user = await db.Users
             .Include(u => u.MusicProfile)
             .FirstOrDefaultAsync(u => u.Id == userId);
 
         if (user == null)
-            throw new Exception($"User with ID {userId} not found in local database.");
+            throw new Exception($"User with ID {userId} not found.");
 
-        // 3. Update User details (Name, Email from Spotify)
-        // Only set name if it's currently empty (e.g., first time login)
-        if (string.IsNullOrEmpty(user.Name))
-        {
-            user.Name = profile.DisplayName ?? profile.Id;
-        }
-        // Update email if available
+        // 3. Force name and email update from Spotify
+        user.Name = profile.DisplayName ?? user.Name ?? "Unknown User";
         user.Email = profile.Email ?? user.Email;
 
-        // 4. Update or Create MusicProfile
+        // 4. Ensure music profile exists
         if (user.MusicProfile == null)
         {
-            user.MusicProfile = new MusicProfile
-            {
-                FavoriteSongs = songs.ToList(),        // List<string>
-                FavoriteArtists = artistsWithImages.Select(a => a.Name).ToList(),
-                FavoriteGenres = genres.ToList()       // List<string>
-            };
-        }
-        else
-        {
-            user.MusicProfile.FavoriteSongs = songs.ToList();
-            user.MusicProfile.FavoriteArtists = artistsWithImages.Select(a => a.Name).ToList();
-            user.MusicProfile.FavoriteGenres = genres.ToList();
+            user.MusicProfile = new MusicProfile();
         }
 
+        // 5. Update musical taste fields
+        user.MusicProfile.FavoriteSongs = topSongs.ToList();
+        user.MusicProfile.FavoriteArtists = topArtistsWithImages.Select(a => a.Name).ToList();
+        user.MusicProfile.FavoriteGenres = topGenres.ToList();
 
-        // 5. Save changes
+        // 6. Save changes
         await db.SaveChangesAsync();
         return user;
     }
