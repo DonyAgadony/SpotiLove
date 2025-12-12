@@ -948,63 +948,7 @@ static string BuildNpgsqlConnectionString(string databaseUrl)
         SslMode = Npgsql.SslMode.Require,
     }.ConnectionString;
 }
-app.MapGet("/debug/user/{userId:guid}", async (AppDbContext db, Guid userId) =>
-{
-    try
-    {
-        var user = await db.Users
-            .Include(u => u.MusicProfile)
-            .Include(u => u.Images)
-            .FirstOrDefaultAsync(u => u.Id == userId);
-
-        if (user == null)
-        {
-            return Results.NotFound(new
-            {
-                success = false,
-                message = $"User {userId} not found"
-            });
-        }
-
-        return Results.Ok(new
-        {
-            success = true,
-            userId = user.Id,
-            name = user.Name,
-            email = user.Email,
-            hasMusicProfile = user.MusicProfile != null,
-            musicProfile = user.MusicProfile != null ? new
-            {
-                id = user.MusicProfile.Id,
-                genres = user.MusicProfile.FavoriteGenres,
-                artists = user.MusicProfile.FavoriteArtists,
-                songs = user.MusicProfile.FavoriteSongs,
-                isEmpty = (user.MusicProfile.FavoriteGenres == null || user.MusicProfile.FavoriteGenres.All(string.IsNullOrWhiteSpace)) &&
-                          (user.MusicProfile.FavoriteArtists == null || user.MusicProfile.FavoriteArtists.All(string.IsNullOrWhiteSpace)) &&
-                          (user.MusicProfile.FavoriteSongs == null || user.MusicProfile.FavoriteSongs.All(string.IsNullOrWhiteSpace))
-
-            } : null,
-            imageCount = user.Images.Count
-        });
-    }
-    catch (Exception ex)
-    {
-        return Results.Problem(
-            detail: ex.Message,
-            title: "Debug endpoint failed",
-            statusCode: 500
-        );
-    }
-});
-// 1. Login trigger
-app.MapGet("/login", (SpotifyService spotify) =>
-{
-    var loginUrl = spotify.GetLoginUrl();
-    return Results.Redirect(loginUrl);
-})
-.WithName("SpotifyAuth")
-.WithSummary("Redirects to Spotify OAuth (handles both login and signup)");
-
+//==========EndPoints=========
 // SINGLE Spotify OAuth Callback - handles both login and signup
 app.MapGet("/callback", async (
     HttpRequest req,
@@ -1046,7 +990,7 @@ app.MapGet("/callback", async (
 
         Console.WriteLine($"📧 Spotify email: {spotifyProfile.Email}");
 
-        // Check if user exists
+        // ✅ FIX 1: Check if user exists BEFORE any async operations
         var existingUser = await db.Users
             .Include(u => u.MusicProfile)
             .FirstOrDefaultAsync(u => u.Email == spotifyProfile.Email);
@@ -1056,7 +1000,7 @@ app.MapGet("/callback", async (
 
         if (existingUser == null)
         {
-            // CREATE NEW USER (Sign Up flow) - Profile will be completed in app
+            // CREATE NEW USER (Sign Up flow)
             isNewUser = true;
 
             var randomPassword = Guid.NewGuid().ToString();
@@ -1067,9 +1011,9 @@ app.MapGet("/callback", async (
                 Name = spotifyProfile.DisplayName ?? spotifyProfile.Id,
                 Email = spotifyProfile.Email,
                 PasswordHash = hashedPassword,
-                Age = 0, // Will be set by user in app
-                Gender = "", // Will be set by user in app
-                SexualOrientation = null, // Will be set by user in app
+                Age = 0,
+                Gender = "",
+                SexualOrientation = null,
                 CreatedAt = DateTime.UtcNow,
                 MusicProfile = new MusicProfile
                 {
@@ -1082,7 +1026,7 @@ app.MapGet("/callback", async (
             db.Users.Add(user);
             await db.SaveChangesAsync();
 
-            Console.WriteLine($"✅ New user created: {user.Email} (ID: {user.Id}) - Profile incomplete");
+            Console.WriteLine($"✅ New user created: {user.Email} (ID: {user.Id})");
         }
         else
         {
@@ -1094,20 +1038,35 @@ app.MapGet("/callback", async (
             Console.WriteLine($"✅ Existing user logged in: {user.Email} (ID: {user.Id})");
         }
 
-        // 🔥 FIX: Get connection string BEFORE starting background task
+        // Generate auth token
+        var token = Guid.NewGuid().ToString();
+
+        // Build deep link URL
+        var deepLinkUrl = $"spotilove://auth/success?token={Uri.EscapeDataString(token)}&userId={user.Id}&isNewUser={isNewUser}&name={Uri.EscapeDataString(user.Name ?? "User")}";
+
+        Console.WriteLine($"🔗 Redirecting to: {deepLinkUrl}");
+
+        // ✅ FIX 2: Get connection string and user ID BEFORE starting background task
         var connectionString = db.Database.GetConnectionString();
         var userId = user.Id;
 
-        // Fetch and update music profile from Spotify (async, don't block redirect)
+        // Start background music sync task (non-blocking)
         _ = Task.Run(async () =>
         {
             try
             {
+                // Wait a bit to ensure the main request completes first
+                await Task.Delay(1000);
+
+                Console.WriteLine($"🎵 Starting background music sync for user {userId}");
+
                 var topSongs = await spotify.GetUserTopSongsAsync(10);
                 var topArtists = await spotify.GetUserTopArtistsWithImagesAsync(10);
                 var topGenres = await spotify.GetUserTopGenresAsync(20);
 
-                // 🔥 FIX: Create a NEW DbContext for this background task
+                Console.WriteLine($"🎵 Fetched Spotify data: {topSongs.Count} songs, {topArtists.Count} artists, {topGenres.Count} genres");
+
+                // ✅ FIX 3: Create a NEW DbContext for background task
                 var optionsBuilder = new DbContextOptionsBuilder<AppDbContext>();
 
                 if (connectionString.StartsWith("postgres://") || connectionString.StartsWith("postgresql://"))
@@ -1137,6 +1096,7 @@ app.MapGet("/callback", async (
                             FavoriteArtists = topArtists.Select(a => a.Name.Trim()).ToList(),
                             FavoriteSongs = topSongs.Select(s => s.Trim()).ToList()
                         };
+                        bgDb.MusicProfiles.Add(bgUser.MusicProfile);
                     }
                     else
                     {
@@ -1151,6 +1111,10 @@ app.MapGet("/callback", async (
                     Console.WriteLine($"   Genres: {string.Join(", ", topGenres.Take(3))}...");
                     Console.WriteLine($"   Artists: {string.Join(", ", topArtists.Select(a => a.Name).Take(3))}...");
                 }
+                else
+                {
+                    Console.WriteLine($"⚠️ Could not find user {userId} in background task");
+                }
             }
             catch (Exception ex)
             {
@@ -1158,15 +1122,7 @@ app.MapGet("/callback", async (
             }
         });
 
-        // Generate auth token
-        var token = Guid.NewGuid().ToString();
-
-        // Build deep link URL to redirect back to the app
-        var deepLinkUrl = $"spotilove://auth/success?token={Uri.EscapeDataString(token)}&userId={user.Id}&isNewUser={isNewUser}&name={Uri.EscapeDataString(user.Name ?? "User")}";
-
-        Console.WriteLine($"🔗 Redirecting to: {deepLinkUrl}");
-
-        // Return an HTML page that auto-redirects
+        // Return HTML page immediately (don't wait for background task)
         var html = $@"
 <!DOCTYPE html>
 <html>
@@ -1286,9 +1242,9 @@ app.MapGet("/callback", async (
 
         return Results.Content(errorHtml, "text/html");
     }
-})
-.WithName("SpotifyCallback")
-.WithSummary("Handles Spotify OAuth callback for both login and signup");
+});
+
+// Helper function for Npgsql connection string
 app.MapPut("/users/{userId:guid}/basic-profile", async (
     AppDbContext db,
     Guid userId,
