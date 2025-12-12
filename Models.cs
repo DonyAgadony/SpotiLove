@@ -219,7 +219,12 @@ public static class DtoMappers
 {
 
     /// Helper to convert User entity to UserDto
-
+    public record BasicProfileUpdateRequest(
+        int Age,
+        string Gender,
+        string SexualOrientation,
+        string? Bio = null
+    );
     public static UserDto ToUserDto(User user)
     {
         return new UserDto

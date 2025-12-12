@@ -1017,7 +1017,6 @@ app.MapGet("/callback", async (
         var code = req.Query["code"].ToString();
         var error = req.Query["error"].ToString();
 
-        // Handle user declining authorization
         if (!string.IsNullOrEmpty(error))
         {
             var errorRedirect = "spotilove://auth/error?message=Authorization declined";
@@ -1057,7 +1056,7 @@ app.MapGet("/callback", async (
 
         if (existingUser == null)
         {
-            // CREATE NEW USER (Sign Up flow)
+            // CREATE NEW USER (Sign Up flow) - Profile will be completed in app
             isNewUser = true;
 
             var randomPassword = Guid.NewGuid().ToString();
@@ -1068,8 +1067,9 @@ app.MapGet("/callback", async (
                 Name = spotifyProfile.DisplayName ?? spotifyProfile.Id,
                 Email = spotifyProfile.Email,
                 PasswordHash = hashedPassword,
-                Age = 18,
-                Gender = "Prefer not to say",
+                Age = 0, // Will be set by user in app
+                Gender = "", // Will be set by user in app
+                SexualOrientation = null, // Will be set by user in app
                 CreatedAt = DateTime.UtcNow,
                 MusicProfile = new MusicProfile
                 {
@@ -1082,7 +1082,7 @@ app.MapGet("/callback", async (
             db.Users.Add(user);
             await db.SaveChangesAsync();
 
-            Console.WriteLine($"✅ New user created: {user.Email} (ID: {user.Id})");
+            Console.WriteLine($"✅ New user created: {user.Email} (ID: {user.Id}) - Profile incomplete");
         }
         else
         {
@@ -1094,6 +1094,10 @@ app.MapGet("/callback", async (
             Console.WriteLine($"✅ Existing user logged in: {user.Email} (ID: {user.Id})");
         }
 
+        // 🔥 FIX: Get connection string BEFORE starting background task
+        var connectionString = db.Database.GetConnectionString();
+        var userId = user.Id;
+
         // Fetch and update music profile from Spotify (async, don't block redirect)
         _ = Task.Run(async () =>
         {
@@ -1103,14 +1107,24 @@ app.MapGet("/callback", async (
                 var topArtists = await spotify.GetUserTopArtistsWithImagesAsync(10);
                 var topGenres = await spotify.GetUserTopGenresAsync(20);
 
-                // Create a new DB context for this background task
+                // 🔥 FIX: Create a NEW DbContext for this background task
                 var optionsBuilder = new DbContextOptionsBuilder<AppDbContext>();
-                var connectionString = db.Database.GetConnectionString();
+
+                if (connectionString.StartsWith("postgres://") || connectionString.StartsWith("postgresql://"))
+                {
+                    optionsBuilder.UseNpgsql(BuildNpgsqlConnectionString(connectionString))
+                                  .UseSnakeCaseNamingConvention();
+                }
+                else
+                {
+                    optionsBuilder.UseSqlite(connectionString);
+                }
+
                 using var bgDb = new AppDbContext(optionsBuilder.Options);
 
                 var bgUser = await bgDb.Users
                     .Include(u => u.MusicProfile)
-                    .FirstOrDefaultAsync(u => u.Id == user.Id);
+                    .FirstOrDefaultAsync(u => u.Id == userId);
 
                 if (bgUser != null)
                 {
@@ -1126,16 +1140,16 @@ app.MapGet("/callback", async (
                     }
                     else
                     {
-                        bgUser.MusicProfile.FavoriteGenres = string.Join(", ", topGenres).Split(',').ToList();
-                        bgUser.MusicProfile.FavoriteArtists = string.Join(", ", topArtists).Split(',').ToList();
-                        bgUser.MusicProfile.FavoriteSongs = string.Join(", ", topSongs).Split(',').ToList();
+                        bgUser.MusicProfile.FavoriteGenres = topGenres.Select(g => g.Trim()).ToList();
+                        bgUser.MusicProfile.FavoriteArtists = topArtists.Select(a => a.Name.Trim()).ToList();
+                        bgUser.MusicProfile.FavoriteSongs = topSongs.Select(s => s.Trim()).ToList();
                     }
 
                     await bgDb.SaveChangesAsync();
 
                     Console.WriteLine($"🎵 Music profile updated for user {bgUser.Id}:");
                     Console.WriteLine($"   Genres: {string.Join(", ", topGenres.Take(3))}...");
-                    Console.WriteLine($"   Artists: {string.Join(", ", topArtists.Take(3))}...");
+                    Console.WriteLine($"   Artists: {string.Join(", ", topArtists.Select(a => a.Name).Take(3))}...");
                 }
             }
             catch (Exception ex)
@@ -1275,6 +1289,60 @@ app.MapGet("/callback", async (
 })
 .WithName("SpotifyCallback")
 .WithSummary("Handles Spotify OAuth callback for both login and signup");
+app.MapPut("/users/{userId:guid}/basic-profile", async (
+    AppDbContext db,
+    Guid userId,
+    DtoMappers.BasicProfileUpdateRequest request) =>
+{
+    try
+    {
+        var user = await db.Users.FirstOrDefaultAsync(u => u.Id == userId);
+
+        if (user == null)
+        {
+            return Results.NotFound(new { success = false, message = "User not found" });
+        }
+
+        // Update basic profile fields
+        user.Age = request.Age;
+        user.Gender = request.Gender;
+        user.SexualOrientation = request.SexualOrientation;
+
+        if (!string.IsNullOrWhiteSpace(request.Bio))
+        {
+            user.Bio = request.Bio;
+        }
+
+        await db.SaveChangesAsync();
+
+        return Results.Ok(new
+        {
+            success = true,
+            message = "Profile updated successfully",
+            user = new
+            {
+                user.Id,
+                user.Name,
+                user.Age,
+                user.Gender,
+                user.SexualOrientation,
+                user.Bio
+            }
+        });
+    }
+    catch (Exception ex)
+    {
+        Console.WriteLine($"❌ Error updating basic profile: {ex.Message}");
+        return Results.Problem(
+            detail: ex.Message,
+            title: "Failed to update profile",
+            statusCode: 500
+        );
+    }
+})
+.WithName("UpdateBasicProfile")
+.WithSummary("Update user's basic profile information (age, gender, sexual orientation, bio)");
+
 //Take n Example Users from DB
 app.MapGet("/takeExUsers", async (AppDbContext db, int count) =>
 {
