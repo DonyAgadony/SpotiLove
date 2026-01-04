@@ -4,6 +4,7 @@ using System.Text.Json;
 using System.Linq;
 using System.Collections.Generic;
 using System.Threading.Tasks;
+using static Spotilove.DtoMappers;
 
 namespace Spotilove;
 
@@ -559,15 +560,4 @@ public class SpotifyService
             .ToList();
     }
 
-    // DTO for song response
-    public class SpotifySongDto
-    {
-        public string Title { get; set; } = "";
-        public string Artist { get; set; } = "";
-        public string? PreviewUrl { get; set; }
-        public string? SpotifyUri { get; set; }
-        public string? SpotifyUrl { get; set; }
-        public string? DeezerPreviewUrl { get; set; }
-
-    }
 }

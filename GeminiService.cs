@@ -8,7 +8,6 @@ namespace Spotilove;
 
 public class GeminiService
 {
-
     public static async Task<int?> CalculatePercentage(MusicProfile p1, MusicProfile p2)
     {
         Console.WriteLine("Tries to approach Gemini");

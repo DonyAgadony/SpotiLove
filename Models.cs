@@ -212,11 +212,37 @@ public record UpdateMusicProfileRequest(
     string Songs,
     string Genres
 );
+
 // =======================================================
-// ===== DTO MAPPERS (To resolve CS8801 error in Database.cs) =====
+// ====               CHATS MODELS                   =====
+// =======================================================
+public class Message
+{
+    public Guid FromUserId { get; set; }
+    public Guid ToUserId { get; set; }
+    public User FromUser { get; set; }
+    public User ToUser { get; set; }
+    public string Content { get; set; }
+    public DateTime SentAt { get; set; }
+    public DateTime? ReadAt { get; set; }
+    public bool IsRead { get; set; }
+}
+
+// =======================================================
+// =====              DTO MAPPERS                    =====
 // =======================================================
 public static class DtoMappers
 {
+    public class SpotifySongDto
+    {
+        public string Title { get; set; } = "";
+        public string Artist { get; set; } = "";
+        public string? PreviewUrl { get; set; }
+        public string? SpotifyUri { get; set; }
+        public string? SpotifyUrl { get; set; }
+        public string? DeezerPreviewUrl { get; set; }
+
+    }
 
     /// Helper to convert User entity to UserDto
     public record BasicProfileUpdateRequest(

@@ -14,6 +14,7 @@ public class AppDbContext : DbContext
     public DbSet<Like> Likes { get; set; } = null!;
     public DbSet<UserImage> UserImages { get; set; } = null!;
     public DbSet<UserSuggestionQueue> UserSuggestionQueues { get; set; } = null!;
+    public DbSet<Message> Messages { get; set; } = null!;
 
     public AppDbContext(DbContextOptions<AppDbContext> options) : base(options) { }
 
@@ -80,6 +81,11 @@ public class AppDbContext : DbContext
             entity.Property(e => e.FavoriteArtists).HasConversion(converter).Metadata.SetValueComparer(comparer);
             entity.Property(e => e.FavoriteSongs).HasConversion(converter).Metadata.SetValueComparer(comparer);
         });
+        // modelBuilder.Entity<Message>()
+        // .HasOne(u => u.FromUser)
+        // .WithMany()
+        // .HasForeignKey(m => m.FromUserId)
+        // .OnDelete(DeleteBehavior.Cascade);
     }
 }
 
