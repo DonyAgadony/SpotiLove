@@ -1526,6 +1526,27 @@ app.MapPost("/auth/login", async (
         }
     });
 });
+// Chat Endpoints
+app.MapGet("/chats/{userId:guid}/conversations", ChatEndpoints.GetUserConversations)
+    .WithName("GetUserConversations")
+    .WithSummary("Get all conversations for a user");
+
+app.MapGet("/chats/{userId:guid}/messages/{otherUserId:guid}", ChatEndpoints.GetMessages)
+    .WithName("GetMessages")
+    .WithSummary("Get messages between two users");
+
+app.MapPost("/chats/send", ChatEndpoints.SendMessage)
+    .WithName("SendMessage")
+    .WithSummary("Send a message to another user");
+
+app.MapPost("/chats/{userId:guid}/mark-read/{otherUserId:guid}", ChatEndpoints.MarkMessagesAsRead)
+    .WithName("MarkMessagesAsRead")
+    .WithSummary("Mark all messages from a user as read");
+
+app.MapDelete("/chats/message/{messageId:guid}",
+    (AppDbContext db, Guid messageId, Guid userId) => ChatEndpoints.DeleteMessage(db, messageId, userId))
+    .WithName("DeleteMessage")
+    .WithSummary("Delete a message");
 
 // ---- User Management Endpoints ----
 app.MapPost("/users", Endpoints.CreateUser);

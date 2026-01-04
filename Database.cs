@@ -81,11 +81,17 @@ public class AppDbContext : DbContext
             entity.Property(e => e.FavoriteArtists).HasConversion(converter).Metadata.SetValueComparer(comparer);
             entity.Property(e => e.FavoriteSongs).HasConversion(converter).Metadata.SetValueComparer(comparer);
         });
-        // modelBuilder.Entity<Message>()
-        // .HasOne(u => u.FromUser)
-        // .WithMany()
-        // .HasForeignKey(m => m.FromUserId)
-        // .OnDelete(DeleteBehavior.Cascade);
+        modelBuilder.Entity<Message>()
+        .HasOne(u => u.FromUser)
+        .WithMany()
+        .HasForeignKey(m => m.FromUserId)
+        .OnDelete(DeleteBehavior.Cascade);
+
+        modelBuilder.Entity<Message>()
+            .HasOne(m => m.ToUser)
+            .WithMany()
+            .HasForeignKey(m => m.ToUserId)
+            .OnDelete(DeleteBehavior.Cascade);
     }
 }
 

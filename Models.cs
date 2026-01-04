@@ -218,16 +218,32 @@ public record UpdateMusicProfileRequest(
 // =======================================================
 public class Message
 {
-    public Guid FromUserId { get; set; }
-    public Guid ToUserId { get; set; }
-    public User FromUser { get; set; }
-    public User ToUser { get; set; }
-    public string Content { get; set; }
-    public DateTime SentAt { get; set; }
-    public DateTime? ReadAt { get; set; }
-    public bool IsRead { get; set; }
-}
+    [Key]
+    public Guid Id { get; set; } = Guid.NewGuid();
 
+    [Required]
+    public Guid FromUserId { get; set; }
+
+    [Required]
+    public Guid ToUserId { get; set; }
+
+    [Required]
+    public string Content { get; set; } = string.Empty;
+
+    public DateTime SentAt { get; set; } = DateTime.UtcNow;
+
+    public DateTime? ReadAt { get; set; }
+
+    public bool IsRead { get; set; } = false;
+
+    [JsonIgnore]
+    [ForeignKey(nameof(FromUserId))]
+    public User FromUser { get; set; } = null!;
+
+    [JsonIgnore]
+    [ForeignKey(nameof(ToUserId))]
+    public User ToUser { get; set; } = null!;
+}
 // =======================================================
 // =====              DTO MAPPERS                    =====
 // =======================================================
