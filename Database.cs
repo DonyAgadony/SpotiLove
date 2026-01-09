@@ -237,12 +237,16 @@ public static class PasswordHasher
             .AsNoTracking()
             .FirstOrDefaultAsync(u => u.Id == id);
 
-        if (user == null) return Results.NotFound(new ResponseMessage { Success = false, Message = "User not found" });
+        if (user == null)
+            return Results.NotFound(new ResponseMessage { Success = false, Message = "User not found" });
 
-        // FIX: Return a clean DTO instead of the full entity
-        return Results.Ok(ToUserDto(user));
+        // Wrap the DTO in a response object
+        return Results.Ok(new
+        {
+            success = true,
+            user = ToUserDto(user)
+        });
     }
-
     // Updates only the music profile fields.
     public static async Task<IResult> UpdateProfile(AppDbContext db, Guid id, UpdateProfileDto dto)
     {
@@ -295,7 +299,7 @@ public static class PasswordHasher
         var userExists = await db.Users.AnyAsync(u => u.Id == id);
         if (!userExists) return Results.NotFound(new ResponseMessage { Success = false, Message = "User not found" });
 
-        // Ensure the image URL is set correctly (simplified)
+        // Ensure the image URL is set correctly
         image.UserId = id;
 
         db.UserImages.Add(image);
