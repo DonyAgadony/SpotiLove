@@ -1070,9 +1070,19 @@ app.MapGet("/callback", async (
             }
             else
             {
-                user.MusicProfile.FavoriteGenres = topGenres.Select(g => g.Trim()).ToList();
-                user.MusicProfile.FavoriteArtists = topArtists.Select(a => a.Name.Trim()).ToList();
-                user.MusicProfile.FavoriteSongs = topSongs.Select(s => s.Trim()).ToList();
+                // ✅ CRITICAL FIX: Clear existing lists first, then add new items
+                // This ensures EF Core properly tracks the changes
+                user.MusicProfile.FavoriteGenres.Clear();
+                user.MusicProfile.FavoriteGenres.AddRange(topGenres.Select(g => g.Trim()));
+
+                user.MusicProfile.FavoriteArtists.Clear();
+                user.MusicProfile.FavoriteArtists.AddRange(topArtists.Select(a => a.Name.Trim()));
+
+                user.MusicProfile.FavoriteSongs.Clear();
+                user.MusicProfile.FavoriteSongs.AddRange(topSongs.Select(s => s.Trim()));
+
+                // Explicitly mark as modified
+                db.Entry(user.MusicProfile).State = EntityState.Modified;
             }
 
             await db.SaveChangesAsync();
