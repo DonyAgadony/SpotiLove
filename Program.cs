@@ -1,11 +1,9 @@
 using Microsoft.EntityFrameworkCore;
 using Spotilove;
-using DotNetEnv;
-using System.Text.Json;
 using Microsoft.AspNetCore.Identity;
-using System.Text.Json.Serialization;
-using static Spotilove.AppDbContext;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
+
 
 DotNetEnv.Env.Load(); // load .env file
 
@@ -963,36 +961,36 @@ app.MapGet("/callback", async (
         var code = req.Query["code"].ToString();
         var error = req.Query["error"].ToString();
 
-        Console.WriteLine($"🔐 Callback received - Code present: {!string.IsNullOrEmpty(code)}, Error: {error}");
+        Console.WriteLine($"Callback received - Code present: {!string.IsNullOrEmpty(code)}, Error: {error}");
 
         if (!string.IsNullOrEmpty(error))
         {
-            Console.WriteLine($"❌ Spotify authorization declined: {error}");
+            Console.WriteLine($"Spotify authorization declined: {error}");
             return Results.Redirect("spotilove://auth/error?message=Authorization declined");
         }
 
         if (string.IsNullOrEmpty(code))
         {
-            Console.WriteLine("❌ Missing authorization code");
+            Console.WriteLine("Missing authorization code");
             return Results.Redirect("spotilove://auth/error?message=Missing authorization code");
         }
 
-        Console.WriteLine("✅ Valid callback code received");
+        Console.WriteLine("Valid callback code received");
 
         // Connect to Spotify
         await spotify.ConnectUserAsync(code);
-        Console.WriteLine("✅ Connected to Spotify API");
+        Console.WriteLine("Connected to Spotify API");
 
         // Fetch user profile
         var spotifyProfile = await spotify.GetUserProfileAsync();
 
         if (spotifyProfile == null || string.IsNullOrEmpty(spotifyProfile.Email))
         {
-            Console.WriteLine("❌ Failed to fetch Spotify profile");
+            Console.WriteLine("Failed to fetch Spotify profile");
             return Results.Redirect("spotilove://auth/error?message=Unable to fetch email from Spotify");
         }
 
-        Console.WriteLine($"📧 Spotify email: {spotifyProfile.Email}");
+        Console.WriteLine($"Spotify email: {spotifyProfile.Email}");
 
         // Check for existing user
         var existingUser = await db.Users
@@ -1004,20 +1002,20 @@ app.MapGet("/callback", async (
 
         if (existingUser == null)
         {
-            // ✅ NEW USER - Create account with music profile
+            //Create account with music profile
             isNewUser = true;
             Console.WriteLine($"👤 Creating new user for: {spotifyProfile.Email}");
 
             var randomPassword = Guid.NewGuid().ToString();
             var hashedPassword = hasher.HashPassword(null!, randomPassword);
 
-            // 🎵 Fetch music data BEFORE creating user
-            Console.WriteLine("🎵 Fetching Spotify music data...");
+            //Fetch music data BEFORE creating user
+            Console.WriteLine("Fetching Spotify music data...");
             var topSongs = await spotify.GetUserTopSongsAsync(10);
             var topArtists = await spotify.GetUserTopArtistsWithImagesAsync(10);
             var topGenres = await spotify.GetUserTopGenresAsync(20);
 
-            Console.WriteLine($"✅ Fetched: {topSongs.Count} songs, {topArtists.Count} artists, {topGenres.Count} genres");
+            Console.WriteLine($"Fetched: {topSongs.Count} songs, {topArtists.Count} artists, {topGenres.Count} genres");
 
             user = new User
             {
@@ -1045,10 +1043,10 @@ app.MapGet("/callback", async (
         }
         else
         {
-            // ✅ EXISTING USER - Update music profile
+            //EXISTING USER - Update music profile
             user = existingUser;
             user.LastLoginAt = DateTime.UtcNow;
-
+            db.Users.Update(user);
             Console.WriteLine($"🔄 Updating existing user's music profile: {user.Email}");
 
             // Fetch fresh music data
@@ -1070,7 +1068,7 @@ app.MapGet("/callback", async (
             }
             else
             {
-                // ✅ CRITICAL FIX: Clear existing lists first, then add new items
+                // Clear existing lists first, then add new items
                 // This ensures EF Core properly tracks the changes
                 user.MusicProfile.FavoriteGenres.Clear();
                 user.MusicProfile.FavoriteGenres.AddRange(topGenres.Select(g => g.Trim()));
@@ -1097,6 +1095,7 @@ app.MapGet("/callback", async (
         var deepLinkUrl = $"spotilove://auth/success?token={Uri.EscapeDataString(token)}&userId={user.Id}&isNewUser={isNewUser}&name={Uri.EscapeDataString(user.Name ?? "User")}";
 
         Console.WriteLine($"🔗 Redirecting to app: {deepLinkUrl}");
+
 
         // Return HTML redirect page
         var html = $@"
