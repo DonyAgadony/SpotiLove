@@ -23,19 +23,21 @@ builder.Services.AddDbContext<AppDbContext>(opt =>
         var databaseUri = new Uri(connectionString);
         var userInfo = databaseUri.UserInfo.Split(':', 2);
 
-        var connStr =
-            $"Host={databaseUri.Host};" +
-            $"Port={databaseUri.Port};" +
-            $"Database={databaseUri.LocalPath.TrimStart('/')};" +
-            $"Username={userInfo[0]};" +
-            $"Password={userInfo[1]};" +
-            $"SSL Mode=Require;" +
-            $"Trust Server Certificate=true";
+        var connStrBuilder = new Npgsql.NpgsqlConnectionStringBuilder
+        {
+            Host = databaseUri.Host,
+            Port = databaseUri.Port > 0 ? databaseUri.Port : 5432,
+            Database = databaseUri.LocalPath.TrimStart('/').Split('?')[0], // Handle query params
+            Username = userInfo[0],
+            Password = userInfo[1],
+            SslMode = Npgsql.SslMode.Require,
+            TrustServerCertificate = true
+        };
 
-        opt.UseNpgsql(connStr)
+        opt.UseNpgsql(connStrBuilder.ConnectionString)
            .UseSnakeCaseNamingConvention();
 
-        Console.WriteLine("Using PostgreSQL database");
+        Console.WriteLine("Using PostgreSQL database (Neon)");
     }
     else
     {
@@ -92,7 +94,11 @@ if (app.Environment.IsDevelopment())
 // 🌐 SERVER CONFIGURATION
 // ===========================================================
 var port = Environment.GetEnvironmentVariable("PORT") ?? "10000";
-app.Urls.Add($"http://0.0.0.0:{port}");
+if (!builder.Environment.IsEnvironment("Design"))
+{
+    port = Environment.GetEnvironmentVariable("PORT") ?? "10000";
+    app.Urls.Add($"http://0.0.0.0:{port}");
+}
 
 // ===========================================================
 // 🌟 API ENDPOINTS
@@ -846,7 +852,7 @@ static async Task UpdateQueueScoresInBackground(Guid userId, List<Guid> suggeste
 
         var optionsBuilder = new DbContextOptionsBuilder<AppDbContext>();
 
-        var cs = Environment.GetEnvironmentVariable("DATABASE_URL")
+        var cs = Environment.GetEnvironmentVariable("DatabaseURL")
                  ?? "Data Source=spotilove.db";
 
         if (cs.StartsWith("postgres://") || cs.StartsWith("postgresql://"))
