@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using Spotilove;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
+using Npgsql;
 
 
 DotNetEnv.Env.Load(); // load .env file
@@ -19,24 +20,30 @@ builder.Services.AddDbContext<AppDbContext>(opt =>
 {
     if (connectionString.StartsWith("postgres://") || connectionString.StartsWith("postgresql://"))
     {
+        var raw = Environment.GetEnvironmentVariable("DatabaseURL");
         var databaseUri = new Uri(connectionString);
-        var userInfo = databaseUri.UserInfo.Split(':', 2);
+        var dbUserInfo = databaseUri.UserInfo.Split(':', 2);
 
-        var connStrBuilder = new Npgsql.NpgsqlConnectionStringBuilder
+
+        var uri = new Uri(raw);
+        var userInfo = uri.UserInfo.Split(':');
+
+        var conn = new NpgsqlConnectionStringBuilder()
         {
-            Host = databaseUri.Host,
-            Port = databaseUri.Port > 0 ? databaseUri.Port : 5432,
-            Database = databaseUri.LocalPath.TrimStart('/').Split('?')[0], // Handle query params
+            Host = uri.Host,
+            Port = uri.Port,
             Username = userInfo[0],
             Password = userInfo[1],
-            SslMode = Npgsql.SslMode.Require,
+            Database = uri.AbsolutePath.Trim('/'),
+            SslMode = SslMode.Require,
             TrustServerCertificate = true
-        };
-
-
-        opt.UseNpgsql(connectionString);
-        Console.WriteLine("Using PostgreSQL database (Neon)");
+        }.ToString();
     }
+    ;
+
+
+    opt.UseNpgsql(connectionString);
+    Console.WriteLine("Using PostgreSQL database (Neon)");
 });
 
 // ===========================================================
