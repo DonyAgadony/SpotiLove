@@ -936,7 +936,6 @@ static async Task UpdateQueueScoresInBackground(Guid userId, List<Guid> suggeste
         Console.WriteLine($"Background update error: {ex.Message}\n{ex.StackTrace}");
     }
 }
-
 static string BuildNpgsqlConnectionString(string databaseUrl)
 {
     var uri = new Uri(databaseUrl);
@@ -945,11 +944,12 @@ static string BuildNpgsqlConnectionString(string databaseUrl)
     return new Npgsql.NpgsqlConnectionStringBuilder
     {
         Host = uri.Host,
-        Port = uri.Port,
+        Port = uri.Port > 0 ? uri.Port : 5432,
         Username = userInfo[0],
         Password = userInfo[1],
-        Database = uri.AbsolutePath.TrimStart('/'),
+        Database = uri.AbsolutePath.TrimStart('/').Split('?')[0],
         SslMode = Npgsql.SslMode.Require,
+        TrustServerCertificate = true
     }.ConnectionString;
 }
 //==========EndPoints=========
