@@ -2,7 +2,6 @@ using Microsoft.EntityFrameworkCore;
 using Spotilove;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.EntityFrameworkCore;
 
 
 DotNetEnv.Env.Load(); // load .env file
@@ -13,8 +12,8 @@ var builder = WebApplication.CreateBuilder(args);
 // 🧩 DATABASE CONFIGURATION (supports SQLite + PostgreSQL)
 // ===========================================================
 var connectionString = Environment.GetEnvironmentVariable("DatabaseURL")
-    ?? builder.Configuration.GetValue<string>("ConnectionStrings:Sqlite")
-    ?? "Data Source=spotilove.db";
+    ?? throw new Exception("DatabaseURL not configured");
+
 
 builder.Services.AddDbContext<AppDbContext>(opt =>
 {
@@ -34,20 +33,14 @@ builder.Services.AddDbContext<AppDbContext>(opt =>
             TrustServerCertificate = true
         };
 
-        opt.UseNpgsql(connStrBuilder.ConnectionString)
-           .UseSnakeCaseNamingConvention();
 
+        opt.UseNpgsql(connectionString);
         Console.WriteLine("Using PostgreSQL database (Neon)");
-    }
-    else
-    {
-        opt.UseSqlite(connectionString);
-        Console.WriteLine("Using SQLite database");
     }
 });
 
 // ===========================================================
-// 🚀 API & SERVICES CONFIGURATION
+//  API & SERVICES CONFIGURATION
 // ===========================================================
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
@@ -72,7 +65,7 @@ var app = builder.Build();
 app.UseCors("AllowAll");
 
 // ===========================================================
-// 🧱 DATABASE MIGRATION + SEEDING
+// DATABASE MIGRATION + SEEDING
 // ===========================================================
 using (var scope = app.Services.CreateScope())
 {

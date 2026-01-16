@@ -11,8 +11,8 @@ using Spotilove;
 namespace JsonDemo.Migrations
 {
     [DbContext(typeof(AppDbContext))]
-    [Migration("20251121095259_InitialCreate")]
-    partial class InitialCreate
+    [Migration("20260116083121_InitPostgres")]
+    partial class InitPostgres
     {
         /// <inheritdoc />
         protected override void BuildTargetModel(ModelBuilder modelBuilder)
@@ -22,12 +22,12 @@ namespace JsonDemo.Migrations
 
             modelBuilder.Entity("Spotilove.Like", b =>
                 {
-                    b.Property<int>("FromUserId")
-                        .HasColumnType("INTEGER")
+                    b.Property<Guid>("FromUserId")
+                        .HasColumnType("TEXT")
                         .HasColumnOrder(0);
 
-                    b.Property<int>("ToUserId")
-                        .HasColumnType("INTEGER")
+                    b.Property<Guid>("ToUserId")
+                        .HasColumnType("TEXT")
                         .HasColumnOrder(1);
 
                     b.Property<DateTime>("CreatedAt")
@@ -43,35 +43,63 @@ namespace JsonDemo.Migrations
 
                     b.HasIndex("ToUserId");
 
-                    b.HasIndex("FromUserId", "ToUserId")
-                        .IsUnique();
-
                     b.ToTable("Likes");
+                });
+
+            modelBuilder.Entity("Spotilove.Message", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("Content")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("FromUserId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool>("IsRead")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime?>("ReadAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("SentAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid>("ToUserId")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("FromUserId");
+
+                    b.HasIndex("ToUserId");
+
+                    b.ToTable("Messages");
                 });
 
             modelBuilder.Entity("Spotilove.MusicProfile", b =>
                 {
-                    b.Property<int>("Id")
+                    b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
-                        .HasColumnType("INTEGER");
+                        .HasColumnType("TEXT");
 
                     b.Property<string>("FavoriteArtists")
                         .IsRequired()
-                        .HasMaxLength(1000)
                         .HasColumnType("TEXT");
 
                     b.Property<string>("FavoriteGenres")
                         .IsRequired()
-                        .HasMaxLength(500)
                         .HasColumnType("TEXT");
 
                     b.Property<string>("FavoriteSongs")
                         .IsRequired()
-                        .HasMaxLength(1000)
                         .HasColumnType("TEXT");
 
-                    b.Property<int>("UserId")
-                        .HasColumnType("INTEGER");
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("TEXT");
 
                     b.HasKey("Id");
 
@@ -83,15 +111,14 @@ namespace JsonDemo.Migrations
 
             modelBuilder.Entity("Spotilove.User", b =>
                 {
-                    b.Property<int>("Id")
+                    b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
-                        .HasColumnType("INTEGER");
+                        .HasColumnType("TEXT");
 
                     b.Property<int>("Age")
                         .HasColumnType("INTEGER");
 
                     b.Property<string>("Bio")
-                        .HasMaxLength(500)
                         .HasColumnType("TEXT");
 
                     b.Property<DateTime>("CreatedAt")
@@ -99,56 +126,46 @@ namespace JsonDemo.Migrations
 
                     b.Property<string>("Email")
                         .IsRequired()
-                        .HasMaxLength(150)
                         .HasColumnType("TEXT");
 
                     b.Property<string>("Gender")
                         .IsRequired()
-                        .HasMaxLength(20)
                         .HasColumnType("TEXT");
 
                     b.Property<DateTime?>("LastLoginAt")
                         .HasColumnType("TEXT");
 
                     b.Property<string>("Location")
-                        .HasMaxLength(100)
                         .HasColumnType("TEXT");
 
                     b.Property<string>("Name")
                         .IsRequired()
-                        .HasMaxLength(100)
                         .HasColumnType("TEXT");
 
                     b.Property<string>("PasswordHash")
                         .IsRequired()
-                        .HasMaxLength(50)
                         .HasColumnType("TEXT");
 
                     b.Property<string>("SexualOrientation")
-                        .HasMaxLength(50)
                         .HasColumnType("TEXT");
 
                     b.HasKey("Id");
-
-                    b.HasIndex("Email")
-                        .IsUnique();
 
                     b.ToTable("Users");
                 });
 
             modelBuilder.Entity("Spotilove.UserImage", b =>
                 {
-                    b.Property<int>("Id")
+                    b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
-                        .HasColumnType("INTEGER");
+                        .HasColumnType("TEXT");
 
                     b.Property<string>("ImageUrl")
                         .IsRequired()
-                        .HasMaxLength(2048)
                         .HasColumnType("TEXT");
 
-                    b.Property<int>("UserId")
-                        .HasColumnType("INTEGER");
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("TEXT");
 
                     b.HasKey("Id");
 
@@ -159,12 +176,12 @@ namespace JsonDemo.Migrations
 
             modelBuilder.Entity("Spotilove.UserSuggestionQueue", b =>
                 {
-                    b.Property<int>("UserId")
-                        .HasColumnType("INTEGER")
+                    b.Property<Guid>("UserId")
+                        .HasColumnType("TEXT")
                         .HasColumnOrder(0);
 
-                    b.Property<int>("SuggestedUserId")
-                        .HasColumnType("INTEGER")
+                    b.Property<Guid>("SuggestedUserId")
+                        .HasColumnType("TEXT")
                         .HasColumnOrder(1);
 
                     b.Property<double>("CompatibilityScore")
@@ -180,25 +197,40 @@ namespace JsonDemo.Migrations
 
                     b.HasIndex("SuggestedUserId");
 
-                    b.HasIndex("UserId", "CompatibilityScore");
-
-                    b.HasIndex("UserId", "QueuePosition");
-
                     b.ToTable("UserSuggestionQueues");
                 });
 
             modelBuilder.Entity("Spotilove.Like", b =>
                 {
                     b.HasOne("Spotilove.User", "FromUser")
-                        .WithMany("Likes")
+                        .WithMany("LikesSent")
                         .HasForeignKey("FromUserId")
-                        .OnDelete(DeleteBehavior.Restrict)
+                        .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
 
                     b.HasOne("Spotilove.User", "ToUser")
                         .WithMany("LikesReceived")
                         .HasForeignKey("ToUserId")
-                        .OnDelete(DeleteBehavior.Restrict)
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("FromUser");
+
+                    b.Navigation("ToUser");
+                });
+
+            modelBuilder.Entity("Spotilove.Message", b =>
+                {
+                    b.HasOne("Spotilove.User", "FromUser")
+                        .WithMany()
+                        .HasForeignKey("FromUserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("Spotilove.User", "ToUser")
+                        .WithMany()
+                        .HasForeignKey("ToUserId")
+                        .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
 
                     b.Navigation("FromUser");
@@ -233,7 +265,7 @@ namespace JsonDemo.Migrations
                     b.HasOne("Spotilove.User", "SuggestedUser")
                         .WithMany()
                         .HasForeignKey("SuggestedUserId")
-                        .OnDelete(DeleteBehavior.Restrict)
+                        .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
 
                     b.HasOne("Spotilove.User", "User")
@@ -251,9 +283,9 @@ namespace JsonDemo.Migrations
                 {
                     b.Navigation("Images");
 
-                    b.Navigation("Likes");
-
                     b.Navigation("LikesReceived");
+
+                    b.Navigation("LikesSent");
 
                     b.Navigation("MusicProfile");
 
