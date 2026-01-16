@@ -10,7 +10,7 @@ DotNetEnv.Env.Load(); // load .env file
 var builder = WebApplication.CreateBuilder(args);
 
 // ===========================================================
-// 🧩 DATABASE CONFIGURATION (supports SQLite + PostgreSQL)
+//   DATABASE CONFIGURATION (supports SQLite + PostgreSQL)
 // ===========================================================
 var raw = Environment.GetEnvironmentVariable("DatabaseURL")
     ?? throw new Exception("DatabaseURL not configured");
@@ -80,8 +80,6 @@ app.UseCors("AllowAll");
 using (var scope = app.Services.CreateScope())
 {
     var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-
-    await db.Database.MigrateAsync();
 }
 
 // ===========================================================
