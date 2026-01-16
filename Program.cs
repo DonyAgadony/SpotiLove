@@ -80,6 +80,35 @@ app.UseCors("AllowAll");
 using (var scope = app.Services.CreateScope())
 {
     var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+
+    try
+    {
+        Console.WriteLine("Connecting to Neon database...");
+        Console.WriteLine($"   Database: {db.Database.GetConnectionString()?.Split(';')[0]}");
+
+        // Ensure database can be connected to
+        var canConnect = await db.Database.CanConnectAsync();
+        Console.WriteLine($"   Can connect: {canConnect}");
+
+        if (!canConnect)
+        {
+            throw new Exception("Cannot connect to Neon database");
+        }
+
+        Console.WriteLine(" Running database migrations...");
+        await db.Database.MigrateAsync();
+        Console.WriteLine(" Migrations completed successfully");
+
+        // Verify tables exist
+        var tableCount = await db.Database.ExecuteSqlRawAsync("SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'public'");
+        Console.WriteLine($"✅ Database initialized with tables in public schema");
+    }
+    catch (Exception ex)
+    {
+        Console.WriteLine($" Database migration failed: {ex.Message}");
+        Console.WriteLine($"   Stack trace: {ex.StackTrace}");
+        throw;
+    }
 }
 
 // ===========================================================
