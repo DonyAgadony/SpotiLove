@@ -12,7 +12,7 @@ var builder = WebApplication.CreateBuilder(args);
 // ===========================================================
 // 🧩 DATABASE CONFIGURATION (supports SQLite + PostgreSQL)
 // ===========================================================
-var connectionString = Environment.GetEnvironmentVariable("DATABASE_URL")
+var connectionString = Environment.GetEnvironmentVariable("DatabaseURL")
     ?? builder.Configuration.GetValue<string>("ConnectionStrings:Sqlite")
     ?? "Data Source=spotilove.db";
 

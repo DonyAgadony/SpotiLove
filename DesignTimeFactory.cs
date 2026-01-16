@@ -10,7 +10,7 @@ public class DesignTimeFactory : IDesignTimeDbContextFactory<AppDbContext>
         var builder = new DbContextOptionsBuilder<AppDbContext>();
 
         var connectionString =
-            Environment.GetEnvironmentVariable("DATABASE_URL")
+            Environment.GetEnvironmentVariable("DatabaseURL")
             ?? "Data Source=spotilove.db";
 
         if (connectionString.StartsWith("postgres://") || connectionString.StartsWith("postgresql://"))
