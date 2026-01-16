@@ -12,39 +12,42 @@ var builder = WebApplication.CreateBuilder(args);
 // ===========================================================
 // 🧩 DATABASE CONFIGURATION (supports SQLite + PostgreSQL)
 // ===========================================================
-var connectionString = Environment.GetEnvironmentVariable("DatabaseURL")
+var raw = Environment.GetEnvironmentVariable("DatabaseURL")
     ?? throw new Exception("DatabaseURL not configured");
 
+string resolvedConn;
+
+// Convert URL-style to Npgsql-style if needed
+if (raw.StartsWith("postgres://") || raw.StartsWith("postgresql://"))
+{
+    var uri = new Uri(raw);
+    var userInfo = uri.UserInfo.Split(':', 2);
+
+    var builder2 = new NpgsqlConnectionStringBuilder
+    {
+        Host = uri.Host,
+        Port = uri.IsDefaultPort ? 5432 : uri.Port,
+        Username = userInfo[0],
+        Password = userInfo.Length > 1 ? userInfo[1] : "",
+        Database = uri.AbsolutePath.Trim('/'),
+        SslMode = SslMode.Require,
+        TrustServerCertificate = true
+    };
+
+    resolvedConn = builder2.ToString();
+}
+else
+{
+    // Already in Npgsql format
+    resolvedConn = raw;
+}
 
 builder.Services.AddDbContext<AppDbContext>(opt =>
 {
-    if (connectionString.StartsWith("postgres://") || connectionString.StartsWith("postgresql://"))
-    {
-        var raw = Environment.GetEnvironmentVariable("DatabaseURL");
-        var databaseUri = new Uri(connectionString);
-        var dbUserInfo = databaseUri.UserInfo.Split(':', 2);
-
-
-        var uri = new Uri(raw);
-        var userInfo = uri.UserInfo.Split(':');
-
-        var conn = new NpgsqlConnectionStringBuilder()
-        {
-            Host = uri.Host,
-            Port = uri.Port,
-            Username = userInfo[0],
-            Password = userInfo[1],
-            Database = uri.AbsolutePath.Trim('/'),
-            SslMode = SslMode.Require,
-            TrustServerCertificate = true
-        }.ToString();
-    }
-    ;
-
-
-    opt.UseNpgsql(connectionString);
+    opt.UseNpgsql(resolvedConn);
     Console.WriteLine("Using PostgreSQL database (Neon)");
 });
+
 
 // ===========================================================
 //  API & SERVICES CONFIGURATION
