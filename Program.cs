@@ -5,8 +5,15 @@ using Microsoft.AspNetCore.Mvc;
 using Npgsql;
 
 
-DotNetEnv.Env.Load(); // load .env file
+DotNetEnv.Env.Load();
 
+// Add debugging
+var dbUrl = Environment.GetEnvironmentVariable("DatabaseURL");
+Console.WriteLine($"🔍 DatabaseURL loaded: {(dbUrl != null ? "YES" : "NO")}");
+if (dbUrl != null)
+{
+    Console.WriteLine($"   Starts with postgresql: {dbUrl.StartsWith("postgresql://")}");
+}
 var builder = WebApplication.CreateBuilder(args);
 
 // ===========================================================
@@ -23,31 +30,50 @@ if (raw.StartsWith("postgres://") || raw.StartsWith("postgresql://"))
     var uri = new Uri(raw);
     var userInfo = uri.UserInfo.Split(':', 2);
 
+    // Parse the database name correctly (remove query parameters)
+    var dbName = uri.AbsolutePath.TrimStart('/');
+    if (dbName.Contains('?'))
+    {
+        dbName = dbName.Substring(0, dbName.IndexOf('?'));
+    }
+
     var builder2 = new NpgsqlConnectionStringBuilder
     {
         Host = uri.Host,
         Port = uri.IsDefaultPort ? 5432 : uri.Port,
         Username = userInfo[0],
         Password = userInfo.Length > 1 ? userInfo[1] : "",
-        Database = uri.AbsolutePath.Trim('/'),
+        Database = dbName,
         SslMode = SslMode.Require,
-        TrustServerCertificate = true
+        TrustServerCertificate = true,
+        // Add these for Neon compatibility
+        IncludeErrorDetail = true,
+        Pooling = true,
+        MaxPoolSize = 20
     };
 
     resolvedConn = builder2.ToString();
+    Console.WriteLine($"✅ Parsed Neon connection: Host={builder2.Host}, DB={builder2.Database}");
 }
 else
 {
-    // Already in Npgsql format
     resolvedConn = raw;
 }
 
 builder.Services.AddDbContext<AppDbContext>(opt =>
 {
-    opt.UseNpgsql(resolvedConn);
-    Console.WriteLine("Using PostgreSQL database (Neon)");
+    opt.UseNpgsql(resolvedConn, npgsqlOptions =>
+    {
+        npgsqlOptions.EnableRetryOnFailure(
+            maxRetryCount: 3,
+            maxRetryDelay: TimeSpan.FromSeconds(5),
+            errorCodesToAdd: null
+        );
+        npgsqlOptions.CommandTimeout(30);
+    });
+    opt.UseSnakeCaseNamingConvention();
+    Console.WriteLine("✅ Using PostgreSQL database (Neon)");
 });
-
 
 // ===========================================================
 //  API & SERVICES CONFIGURATION
@@ -83,34 +109,49 @@ using (var scope = app.Services.CreateScope())
 
     try
     {
-        Console.WriteLine("Connecting to Neon database...");
-        Console.WriteLine($"   Database: {db.Database.GetConnectionString()?.Split(';')[0]}");
+        Console.WriteLine("🔗 Connecting to Neon database...");
+        Console.WriteLine($"   Host: {db.Database.GetConnectionString()?.Split(';').FirstOrDefault(s => s.Contains("Host"))}");
 
-        // Ensure database can be connected to
         var canConnect = await db.Database.CanConnectAsync();
-        Console.WriteLine($"   Can connect: {canConnect}");
+        Console.WriteLine($"   Connection status: {(canConnect ? "✅ SUCCESS" : "❌ FAILED")}");
 
         if (!canConnect)
         {
-            throw new Exception("Cannot connect to Neon database");
+            throw new Exception("Cannot connect to Neon database - check connection string");
         }
 
-        Console.WriteLine(" Running database migrations...");
+        Console.WriteLine("📦 Applying database migrations...");
+
+        // Get pending migrations
+        var pendingMigrations = await db.Database.GetPendingMigrationsAsync();
+        Console.WriteLine($"   Pending migrations: {pendingMigrations.Count()}");
+
+        foreach (var migration in pendingMigrations)
+        {
+            Console.WriteLine($"   - {migration}");
+        }
+
         await db.Database.MigrateAsync();
-        Console.WriteLine(" Migrations completed successfully");
+        Console.WriteLine("✅ Migrations completed successfully");
 
         // Verify tables exist
-        var tableCount = await db.Database.ExecuteSqlRawAsync("SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'public'");
-        Console.WriteLine($"✅ Database initialized with tables in public schema");
+        var appliedMigrations = await db.Database.GetAppliedMigrationsAsync();
+        Console.WriteLine($"✅ Applied migrations: {appliedMigrations.Count()}");
     }
     catch (Exception ex)
     {
-        Console.WriteLine($" Database migration failed: {ex.Message}");
+        Console.WriteLine($"❌ Database setup failed: {ex.Message}");
+        Console.WriteLine($"   Type: {ex.GetType().Name}");
         Console.WriteLine($"   Stack trace: {ex.StackTrace}");
+
+        if (ex.InnerException != null)
+        {
+            Console.WriteLine($"   Inner exception: {ex.InnerException.Message}");
+        }
+
         throw;
     }
 }
-
 // ===========================================================
 // 🧑‍💻 DEVELOPMENT TOOLS
 // ===========================================================

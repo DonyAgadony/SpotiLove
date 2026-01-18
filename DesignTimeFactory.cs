@@ -18,11 +18,18 @@ public class DesignTimeFactory : IDesignTimeDbContextFactory<AppDbContext>
             var databaseUri = new Uri(connectionString);
             var userInfo = databaseUri.UserInfo.Split(':', 2);
 
+            // Fix database name parsing
+            var dbName = databaseUri.AbsolutePath.TrimStart('/');
+            if (dbName.Contains('?'))
+            {
+                dbName = dbName.Substring(0, dbName.IndexOf('?'));
+            }
+
             var connStrBuilder = new Npgsql.NpgsqlConnectionStringBuilder
             {
                 Host = databaseUri.Host,
                 Port = databaseUri.Port > 0 ? databaseUri.Port : 5432,
-                Database = databaseUri.LocalPath.TrimStart('/').Split('?')[0],
+                Database = dbName,
                 Username = userInfo[0],
                 Password = userInfo[1],
                 SslMode = Npgsql.SslMode.Require,
