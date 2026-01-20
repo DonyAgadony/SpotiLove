@@ -428,20 +428,6 @@
           }
         }
       },
-      "Microsoft.Data.Sqlite/9.0.8": {
-        "type": "package",
-        "dependencies": {
-          "Microsoft.Data.Sqlite.Core": "9.0.8",
-          "SQLitePCLRaw.bundle_e_sqlite3": "2.1.10",
-          "SQLitePCLRaw.core": "2.1.10"
-        },
-        "compile": {
-          "lib/netstandard2.0/_._": {}
-        },
-        "runtime": {
-          "lib/netstandard2.0/_._": {}
-        }
-      },
       "Microsoft.Data.Sqlite.Core/9.0.8": {
         "type": "package",
         "dependencies": {
@@ -1620,15 +1606,6 @@
           "ref/netstandard1.3/System.Console.dll": {
             "related": ".xml"
           }
-        }
-      },
-      "System.Data.SQLite/2.0.1": {
-        "type": "package",
-        "compile": {
-          "lib/netstandard2.1/System.Data.SQLite.dll": {}
-        },
-        "runtime": {
-          "lib/netstandard2.1/System.Data.SQLite.dll": {}
         }
       },
       "System.Diagnostics.Debug/4.3.0": {
@@ -3765,20 +3742,6 @@
         "microsoft.codeanalysis.workspaces.msbuild.nuspec"
       ]
     },
-    "Microsoft.Data.Sqlite/9.0.8": {
-      "sha512": "wzA4Lukgc0avl5UMnnJFHMdG1Pn5FUnq+fjDgdUqHgzv3z1+bs4wvuFRxet0atl4N6kfrUM/FhmkyUb4cy0g8g==",
-      "type": "package",
-      "path": "microsoft.data.sqlite/9.0.8",
-      "files": [
-        ".nupkg.metadata",
-        ".signature.p7s",
-        "Icon.png",
-        "PACKAGE.md",
-        "lib/netstandard2.0/_._",
-        "microsoft.data.sqlite.9.0.8.nupkg.sha512",
-        "microsoft.data.sqlite.nuspec"
-      ]
-    },
     "Microsoft.Data.Sqlite.Core/9.0.8": {
       "sha512": "AQr1nLGi1riN7XA2c8uAKAr2fo7bvZ++VRnvKyh/rhsj2f4x0Nmgk2j8+Rw9RaJrzZMcv0Mu4nYNpAdSui/FHw==",
       "type": "package",
@@ -5636,20 +5599,6 @@
         "ref/xamarinwatchos10/_._",
         "system.console.4.3.0.nupkg.sha512",
         "system.console.nuspec"
-      ]
-    },
-    "System.Data.SQLite/2.0.1": {
-      "sha512": "x1WBY7ADvWQD7vvupe+S4b7MTj3YyMRl4iysDvgclt+i1AZDdplox0sWslplvzK+eapmegQYuKV8lQhf4o8b5Q==",
-      "type": "package",
-      "path": "system.data.sqlite/2.0.1",
-      "files": [
-        ".nupkg.metadata",
-        ".signature.p7s",
-        "lib/net471/System.Data.SQLite.dll",
-        "lib/netstandard2.0/System.Data.SQLite.dll",
-        "lib/netstandard2.1/System.Data.SQLite.dll",
-        "system.data.sqlite.2.0.1.nupkg.sha512",
-        "system.data.sqlite.nuspec"
       ]
     },
     "System.Diagnostics.Debug/4.3.0": {
@@ -8612,7 +8561,6 @@
       "DotNetENV >= 3.1.1",
       "EFCore.NamingConventions >= 9.0.0",
       "Microsoft.AspNetCore.OpenApi >= 9.0.2",
-      "Microsoft.Data.SQLite >= 9.0.8",
       "Microsoft.EntityFrameworkCore >= 9.0.10",
       "Microsoft.EntityFrameworkCore.Design >= 9.0.10",
       "Microsoft.EntityFrameworkCore.Sqlite >= 9.0.8",
@@ -8621,8 +8569,7 @@
       "Spotify >= 1.0.0",
       "SpotifyAPI.Web >= 7.2.1",
       "SpotifyAPI.Web.Auth >= 7.2.1",
-      "Swashbuckle.AspNetCore >= 9.0.4",
-      "System.Data.SQLite >= 2.0.1"
+      "Swashbuckle.AspNetCore >= 9.0.4"
     ]
   },
   "packageFolders": {
@@ -8688,10 +8635,6 @@
             "target": "Package",
             "version": "[9.0.2, )"
           },
-          "Microsoft.Data.SQLite": {
-            "target": "Package",
-            "version": "[9.0.8, )"
-          },
           "Microsoft.EntityFrameworkCore": {
             "target": "Package",
             "version": "[9.0.10, )"
@@ -8731,10 +8674,6 @@
           "Swashbuckle.AspNetCore": {
             "target": "Package",
             "version": "[9.0.4, )"
-          },
-          "System.Data.SQLite": {
-            "target": "Package",
-            "version": "[2.0.1, )"
           }
         },
         "imports": [

@@ -63,10 +63,6 @@
               "target": "Package",
               "version": "[9.0.2, )"
             },
-            "Microsoft.Data.SQLite": {
-              "target": "Package",
-              "version": "[9.0.8, )"
-            },
             "Microsoft.EntityFrameworkCore": {
               "target": "Package",
               "version": "[9.0.10, )"
@@ -106,10 +102,6 @@
             "Swashbuckle.AspNetCore": {
               "target": "Package",
               "version": "[9.0.4, )"
-            },
-            "System.Data.SQLite": {
-              "target": "Package",
-              "version": "[2.0.1, )"
             }
           },
           "imports": [
