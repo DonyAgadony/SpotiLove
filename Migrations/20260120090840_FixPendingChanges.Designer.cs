@@ -11,7 +11,7 @@ using Spotilove;
 namespace JsonDemo.Migrations
 {
     [DbContext(typeof(AppDbContext))]
-    [Migration("20260120090040_FixPendingChanges")]
+    [Migration("20260120090840_FixPendingChanges")]
     partial class FixPendingChanges
     {
         /// <inheritdoc />
