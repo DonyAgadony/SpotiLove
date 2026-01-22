@@ -4,65 +4,49 @@ using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
 using Npgsql;
 
-
 DotNetEnv.Env.Load();
 
-// Add debugging
-var dbUrl = Environment.GetEnvironmentVariable("DatabaseURL");
-Console.WriteLine($"🔍 DatabaseURL loaded: {(dbUrl != null ? "YES" : "NO")}");
-if (dbUrl != null)
-{
-    Console.WriteLine($"   Starts with postgresql: {dbUrl.StartsWith("postgresql://")}");
-}
+// ============================================
+// DATABASE CONFIGURATION FOR COOLIFY
+// ============================================
+
 var builder = WebApplication.CreateBuilder(args);
 
-// ===========================================================
-//   DATABASE CONFIGURATION (supports SQLite + PostgreSQL)
-// ===========================================================
-var raw = Environment.GetEnvironmentVariable("DatabaseURL")
-    ?? throw new Exception("DatabaseURL not configured");
+// Get database configuration from Coolify environment variables
+var dbHost = Environment.GetEnvironmentVariable("POSTGRES_HOST") ?? "localhost";
+var dbPort = Environment.GetEnvironmentVariable("POSTGRES_PORT") ?? "5432";
+var dbName = Environment.GetEnvironmentVariable("POSTGRES_DB") ?? "postgres";
+var dbUser = Environment.GetEnvironmentVariable("POSTGRES_USER") ?? "postgres";
+var dbPassword = Environment.GetEnvironmentVariable("POSTGRES_PASSWORD") ?? "";
 
-string resolvedConn;
+Console.WriteLine("🔍 Database Configuration:");
+Console.WriteLine($"   Host: {dbHost}");
+Console.WriteLine($"   Port: {dbPort}");
+Console.WriteLine($"   Database: {dbName}");
+Console.WriteLine($"   User: {dbUser}");
+Console.WriteLine($"   Password: {(string.IsNullOrEmpty(dbPassword) ? "NOT SET" : "***")}");
 
-// Convert URL-style to Npgsql-style if needed
-if (raw.StartsWith("postgres://") || raw.StartsWith("postgresql://"))
+// Build connection string
+var connectionString = new NpgsqlConnectionStringBuilder
 {
-    var uri = new Uri(raw);
-    var userInfo = uri.UserInfo.Split(':', 2);
+    Host = dbHost,
+    Port = int.Parse(dbPort),
+    Database = dbName,
+    Username = dbUser,
+    Password = dbPassword,
+    SslMode = SslMode.Prefer, // Coolify typically uses Prefer or Disable
+    TrustServerCertificate = true,
+    IncludeErrorDetail = true,
+    Pooling = true,
+    MaxPoolSize = 20,
+    Timeout = 30
+}.ToString();
 
-    // Parse the database name correctly (remove query parameters)
-    var dbName = uri.AbsolutePath.TrimStart('/');
-    if (dbName.Contains('?'))
-    {
-        dbName = dbName.Substring(0, dbName.IndexOf('?'));
-    }
-
-    var builder2 = new NpgsqlConnectionStringBuilder
-    {
-        Host = uri.Host,
-        Port = uri.IsDefaultPort ? 5432 : uri.Port,
-        Username = userInfo[0],
-        Password = userInfo.Length > 1 ? userInfo[1] : "",
-        Database = dbName,
-        SslMode = SslMode.Require,
-        TrustServerCertificate = true,
-        // Add these for Neon compatibility
-        IncludeErrorDetail = true,
-        Pooling = true,
-        MaxPoolSize = 20
-    };
-
-    resolvedConn = builder2.ToString();
-    Console.WriteLine($"✅ Parsed Neon connection: Host={builder2.Host}, DB={builder2.Database}");
-}
-else
-{
-    resolvedConn = raw;
-}
+Console.WriteLine($"✅ Connection string built successfully");
 
 builder.Services.AddDbContext<AppDbContext>(opt =>
 {
-    opt.UseNpgsql(resolvedConn, npgsqlOptions =>
+    opt.UseNpgsql(connectionString, npgsqlOptions =>
     {
         npgsqlOptions.EnableRetryOnFailure(
             maxRetryCount: 3,
@@ -72,7 +56,7 @@ builder.Services.AddDbContext<AppDbContext>(opt =>
         npgsqlOptions.CommandTimeout(30);
     });
     opt.UseSnakeCaseNamingConvention();
-    Console.WriteLine("✅ Using PostgreSQL database (Neon)");
+    Console.WriteLine("✅ Using PostgreSQL database (Coolify)");
 });
 
 // ===========================================================
@@ -109,15 +93,14 @@ using (var scope = app.Services.CreateScope())
 
     try
     {
-        Console.WriteLine("🔗 Connecting to Neon database...");
-        Console.WriteLine($"   Host: {db.Database.GetConnectionString()?.Split(';').FirstOrDefault(s => s.Contains("Host"))}");
+        Console.WriteLine("🔗 Connecting to Coolify PostgreSQL database...");
 
         var canConnect = await db.Database.CanConnectAsync();
         Console.WriteLine($"   Connection status: {(canConnect ? "✅ SUCCESS" : "❌ FAILED")}");
 
         if (!canConnect)
         {
-            throw new Exception("Cannot connect to Neon database - check connection string");
+            throw new Exception("Cannot connect to Coolify PostgreSQL - check environment variables");
         }
 
         Console.WriteLine("📦 Applying database migrations...");
@@ -142,16 +125,17 @@ using (var scope = app.Services.CreateScope())
     {
         Console.WriteLine($"❌ Database setup failed: {ex.Message}");
         Console.WriteLine($"   Type: {ex.GetType().Name}");
-        Console.WriteLine($"   Stack trace: {ex.StackTrace}");
 
         if (ex.InnerException != null)
         {
             Console.WriteLine($"   Inner exception: {ex.InnerException.Message}");
         }
 
-        throw;
+        // Don't throw - let the app start so you can debug
+        Console.WriteLine("⚠️ Continuing despite database error - check configuration!");
     }
 }
+
 // ===========================================================
 // 🧑‍💻 DEVELOPMENT TOOLS
 // ===========================================================
@@ -167,7 +151,6 @@ if (app.Environment.IsDevelopment())
 var port = Environment.GetEnvironmentVariable("PORT") ?? "10000";
 if (!builder.Environment.IsEnvironment("Design"))
 {
-    port = Environment.GetEnvironmentVariable("PORT") ?? "10000";
     app.Urls.Add($"http://0.0.0.0:{port}");
 }
 
@@ -175,24 +158,39 @@ if (!builder.Environment.IsEnvironment("Design"))
 // 🌟 API ENDPOINTS
 // ===========================================================
 
-// Health check
-app.MapGet("/", () => Results.Ok(new
+// Health check with database status
+app.MapGet("/", async (AppDbContext db) =>
 {
-    message = "Spotilove API is running!",
-    timestamp = DateTime.UtcNow,
-    endpoints = new
+    bool dbConnected = false;
+    try
     {
-        users = "/users?userId={id}",
-        user_images = "/users/{id}/images",
-        swipe_discover = "/swipe/discover/{userId}",
-        swipe_action = "/swipe",
-        swipe_like = "/swipe/{fromUserId}/like/{toUserId}",
-        swipe_pass = "/swipe/{fromUserId}/pass/{toUserId}",
-        matches = "/matches/{userId}",
-        swipe_stats = "/swipe/stats/{userId}",
-        swagger = "/swagger"
+        dbConnected = await db.Database.CanConnectAsync();
     }
-}));
+    catch { }
+
+    return Results.Ok(new
+    {
+        message = "Spotilove API is running!",
+        timestamp = DateTime.UtcNow,
+        database = new
+        {
+            connected = dbConnected,
+            type = "PostgreSQL (Coolify)"
+        },
+        endpoints = new
+        {
+            users = "/users?userId={id}",
+            user_images = "/users/{id}/images",
+            swipe_discover = "/swipe/discover/{userId}",
+            swipe_action = "/swipe",
+            swipe_like = "/swipe/{fromUserId}/like/{toUserId}",
+            swipe_pass = "/swipe/{fromUserId}/pass/{toUserId}",
+            matches = "/matches/{userId}",
+            swipe_stats = "/swipe/stats/{userId}",
+            swagger = "/swagger"
+        }
+    });
+});
 // Get popular artists for selection
 app.MapGet("/spotify/popular-artists", async (SpotifyService spotifyService, int limit = 20) =>
 {
