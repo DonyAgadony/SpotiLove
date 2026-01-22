@@ -13,12 +13,15 @@ DotNetEnv.Env.Load();
 var builder = WebApplication.CreateBuilder(args);
 
 // Get database configuration from Coolify environment variables
-var dbHost = Environment.GetEnvironmentVariable("PostgresHost") ?? "localhost";
-var dbPort = Environment.GetEnvironmentVariable("PostgresPort") ?? "5432";
-var dbName = Environment.GetEnvironmentVariable("PostgresDatabase") ?? "postgres";
-var dbUser = Environment.GetEnvironmentVariable("PostgresUser") ?? "postgres";
-var dbPassword = Environment.GetEnvironmentVariable("PostgrePassword") ?? "";
+var dbHost = Environment.GetEnvironmentVariable("POSTGRES_HOST") ?? "localhost";
 
+var dbPort = Environment.GetEnvironmentVariable("POSTGRES_PORT") ?? "5432";
+
+var dbName = Environment.GetEnvironmentVariable("POSTGRES_DB") ?? "postgres";
+
+var dbUser = Environment.GetEnvironmentVariable("POSTGRES_USER") ?? "postgres";
+
+var dbPassword = Environment.GetEnvironmentVariable("POSTGRES_PASSWORD") ?? "";
 Console.WriteLine("🔍 Database Configuration:");
 Console.WriteLine($"   Host: {dbHost}");
 Console.WriteLine($"   Port: {dbPort}");
@@ -34,7 +37,7 @@ var connectionString = new NpgsqlConnectionStringBuilder
     Database = dbName,
     Username = dbUser,
     Password = dbPassword,
-    SslMode = SslMode.Prefer, // Coolify typically uses Prefer or Disable
+    SslMode = SslMode.Prefer,
     TrustServerCertificate = true,
     IncludeErrorDetail = true,
     Pooling = true,
