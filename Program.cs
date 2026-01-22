@@ -22,7 +22,8 @@ Console.WriteLine("Using DATABASE_URL for PostgreSQL");
 
 // Build connection string
 Console.WriteLine($"Connection string built successfully");
-
+Console.WriteLine($"DB Host: {new Uri(databaseUrl).Host}");
+Console.WriteLine($"DB Name: {new Uri(databaseUrl).AbsolutePath.TrimStart('/')}");
 builder.Services.AddDbContext<AppDbContext>(opt =>
 {
     opt.UseNpgsql(connectionString, npgsqlOptions =>
