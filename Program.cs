@@ -11,41 +11,17 @@ DotNetEnv.Env.Load();
 // ============================================
 
 var builder = WebApplication.CreateBuilder(args);
+DotNetEnv.Env.Load();
 
-// Get database configuration from Coolify environment variables
-var dbHost = Environment.GetEnvironmentVariable("POSTGRES_HOST") ?? "localhost";
+var databaseUrl = Environment.GetEnvironmentVariable("DatabaseURL")
+    ?? throw new Exception("DatabaseURL is not set");
 
-var dbPort = Environment.GetEnvironmentVariable("POSTGRES_PORT") ?? "5432";
+var connectionString = BuildNpgsqlConnectionString(databaseUrl);
 
-var dbName = Environment.GetEnvironmentVariable("POSTGRES_DB") ?? "postgres";
-
-var dbUser = Environment.GetEnvironmentVariable("POSTGRES_USER") ?? "postgres";
-
-var dbPassword = Environment.GetEnvironmentVariable("POSTGRES_PASSWORD") ?? "";
-Console.WriteLine("🔍 Database Configuration:");
-Console.WriteLine($"   Host: {dbHost}");
-Console.WriteLine($"   Port: {dbPort}");
-Console.WriteLine($"   Database: {dbName}");
-Console.WriteLine($"   User: {dbUser}");
-Console.WriteLine($"   Password: {(string.IsNullOrEmpty(dbPassword) ? "NOT SET" : "***")}");
+Console.WriteLine("Using DATABASE_URL for PostgreSQL");
 
 // Build connection string
-var connectionString = new NpgsqlConnectionStringBuilder
-{
-    Host = dbHost,
-    Port = int.Parse(dbPort),
-    Database = dbName,
-    Username = dbUser,
-    Password = dbPassword,
-    SslMode = SslMode.Prefer,
-    TrustServerCertificate = true,
-    IncludeErrorDetail = true,
-    Pooling = true,
-    MaxPoolSize = 20,
-    Timeout = 30
-}.ToString();
-
-Console.WriteLine($"✅ Connection string built successfully");
+Console.WriteLine($"Connection string built successfully");
 
 builder.Services.AddDbContext<AppDbContext>(opt =>
 {
@@ -59,7 +35,7 @@ builder.Services.AddDbContext<AppDbContext>(opt =>
         npgsqlOptions.CommandTimeout(30);
     });
     opt.UseSnakeCaseNamingConvention();
-    Console.WriteLine("✅ Using PostgreSQL database (Coolify)");
+    Console.WriteLine("Using PostgreSQL database (Coolify)");
 });
 
 // ===========================================================
