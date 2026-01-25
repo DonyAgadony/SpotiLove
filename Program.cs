@@ -12,32 +12,41 @@ DotNetEnv.Env.Load();
 
 var builder = WebApplication.CreateBuilder(args);
 DotNetEnv.Env.Load();
-
-var databaseUrl = Environment.GetEnvironmentVariable("DatabaseURL")
-    ?? throw new Exception("DatabaseURL is not set");
-
-var connectionString = BuildNpgsqlConnectionString(databaseUrl);
-
-Console.WriteLine("Using DATABASE_URL for PostgreSQL");
-
-// Build connection string
-Console.WriteLine($"Connection string built successfully");
-Console.WriteLine($"DB Host: {new Uri(databaseUrl).Host}");
-Console.WriteLine($"DB Name: {new Uri(databaseUrl).AbsolutePath.TrimStart('/')}");
-builder.Services.AddDbContext<AppDbContext>(opt =>
+try
 {
-    opt.UseNpgsql(connectionString, npgsqlOptions =>
+
+    var databaseUrl = Environment.GetEnvironmentVariable("DatabaseURL")
+        ?? throw new Exception("DatabaseURL is not set");
+
+    var connectionString = BuildNpgsqlConnectionString(databaseUrl);
+
+    Console.WriteLine("Using DATABASE_URL for PostgreSQL");
+
+    // Build connection string
+    Console.WriteLine($"Connection string built successfully");
+    Console.WriteLine($"DB Host: {new Uri(databaseUrl).Host}");
+    Console.WriteLine($"DB Name: {new Uri(databaseUrl).AbsolutePath.TrimStart('/')}");
+    builder.Services.AddDbContext<AppDbContext>(opt =>
     {
-        npgsqlOptions.EnableRetryOnFailure(
-            maxRetryCount: 3,
-            maxRetryDelay: TimeSpan.FromSeconds(5),
-            errorCodesToAdd: null
-        );
-        npgsqlOptions.CommandTimeout(30);
+        opt.UseNpgsql(connectionString, npgsqlOptions =>
+        {
+            npgsqlOptions.EnableRetryOnFailure(
+                maxRetryCount: 3,
+                maxRetryDelay: TimeSpan.FromSeconds(5),
+                errorCodesToAdd: null
+            );
+            npgsqlOptions.CommandTimeout(30);
+        });
+        opt.UseSnakeCaseNamingConvention();
+        Console.WriteLine("Using PostgreSQL database (Coolify)");
     });
-    opt.UseSnakeCaseNamingConvention();
-    Console.WriteLine("Using PostgreSQL database (Coolify)");
-});
+}
+catch (Exception ex)
+{
+    var cs = Environment.GetEnvironmentVariable("ConnectionStrings__PostgresConnection");
+    await using var connection = new NpgsqlConnection(cs);
+    await connection.OpenAsync();
+}
 
 // ===========================================================
 //  API & SERVICES CONFIGURATION
@@ -990,14 +999,14 @@ static string BuildNpgsqlConnectionString(string databaseUrl)
     var uri = new Uri(databaseUrl);
     var userInfo = uri.UserInfo.Split(':');
 
-    return new Npgsql.NpgsqlConnectionStringBuilder
+    return new NpgsqlConnectionStringBuilder
     {
         Host = uri.Host,
         Port = uri.Port > 0 ? uri.Port : 5432,
         Username = userInfo[0],
         Password = userInfo[2],
         Database = uri.AbsolutePath.TrimStart('/').Split('?')[0],
-        SslMode = Npgsql.SslMode.Require,
+        SslMode = SslMode.Require,
         TrustServerCertificate = true
     }.ConnectionString;
 }
