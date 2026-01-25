@@ -73,17 +73,17 @@ using (var scope = app.Services.CreateScope())
 
     try
     {
-        Console.WriteLine("🔗 Connecting to Coolify PostgreSQL database...");
+        Console.WriteLine(" Connecting to Coolify PostgreSQL database...");
 
         var canConnect = await db.Database.CanConnectAsync();
-        Console.WriteLine($"   Connection status: {(canConnect ? "✅ SUCCESS" : "❌ FAILED")}");
+        Console.WriteLine($"   Connection status: {(canConnect ? " SUCCESS" : " FAILED")}");
 
         if (!canConnect)
         {
             throw new Exception("Cannot connect to Coolify PostgreSQL - check environment variables");
         }
 
-        Console.WriteLine("📦 Applying database migrations...");
+        Console.WriteLine(" Applying database migrations...");
 
         // Get pending migrations
         var pendingMigrations = await db.Database.GetPendingMigrationsAsync();
@@ -95,15 +95,15 @@ using (var scope = app.Services.CreateScope())
         }
 
         await db.Database.MigrateAsync();
-        Console.WriteLine("✅ Migrations completed successfully");
+        Console.WriteLine(" Migrations completed successfully");
 
         // Verify tables exist
         var appliedMigrations = await db.Database.GetAppliedMigrationsAsync();
-        Console.WriteLine($"✅ Applied migrations: {appliedMigrations.Count()}");
+        Console.WriteLine($" Applied migrations: {appliedMigrations.Count()}");
     }
     catch (Exception ex)
     {
-        Console.WriteLine($"❌ Database setup failed: {ex.Message}");
+        Console.WriteLine($" Database setup failed: {ex.Message}");
         Console.WriteLine($"   Type: {ex.GetType().Name}");
 
         if (ex.InnerException != null)
@@ -112,7 +112,7 @@ using (var scope = app.Services.CreateScope())
         }
 
         // Don't throw - let the app start so you can debug
-        Console.WriteLine("⚠️ Continuing despite database error - check configuration!");
+        Console.WriteLine(" Continuing despite database error - check configuration!");
     }
 }
 
@@ -135,7 +135,7 @@ if (!builder.Environment.IsEnvironment("Design"))
 }
 
 // ===========================================================
-// 🌟 API ENDPOINTS
+//   API ENDPOINTS
 // ===========================================================
 
 // Health check with database status
@@ -201,7 +201,7 @@ app.MapGet("/spotify/search-artists", async (SpotifyService spotifyService, stri
     }
     catch (Exception ex)
     {
-        Console.WriteLine($"❌ Error searching artists: {ex.Message}");
+        Console.WriteLine($" Error searching artists: {ex.Message}");
         return Results.Problem(detail: ex.Message, title: "Failed to search artists");
     }
 })
@@ -248,7 +248,7 @@ app.MapGet("/debug/all-users", async (AppDbContext db) =>
     }
     catch (Exception ex)
     {
-        Console.WriteLine($"❌ Error fetching users: {ex.Message}");
+        Console.WriteLine($"  Error fetching users: {ex.Message}");
         return Results.Problem(
             detail: ex.Message,
             title: "Failed to fetch users",
@@ -272,7 +272,7 @@ app.MapGet("/spotify/artist-top-tracks"!, async (
         Console.WriteLine($"🎵 Fetching tracks for artist: {artistName}");
         var tracks = await spotifyService.GetArtistTopTracksAsync(artistName, limit);
 
-        Console.WriteLine($"✅ Found {tracks.Count} tracks");
+        Console.WriteLine($"  Found {tracks.Count} tracks");
         foreach (var track in tracks)
         {
             Console.WriteLine($"   - {track.Title} | Preview: {(track.PreviewUrl != null ? "✓" : "✗")}");
@@ -282,7 +282,7 @@ app.MapGet("/spotify/artist-top-tracks"!, async (
     }
     catch (Exception ex)
     {
-        Console.WriteLine($"❌ Error fetching artist tracks: {ex.Message}");
+        Console.WriteLine($"  Error fetching artist tracks: {ex.Message}");
         return Results.Problem(detail: ex.Message, title: "Failed to fetch artist tracks");
     }
 })
@@ -304,7 +304,7 @@ app.MapGet("/spotify/genres-from-artists", async (SpotifyService spotifyService,
     }
     catch (Exception ex)
     {
-        Console.WriteLine($"❌ Error fetching genres: {ex.Message}");
+        Console.WriteLine($"  Error fetching genres: {ex.Message}");
         return Results.Problem(detail: ex.Message, title: "Failed to fetch genres");
     }
 })
@@ -365,7 +365,7 @@ app.MapPost("/users/{userId:guid}/profile", async (
     }
     catch (Exception ex)
     {
-        Console.WriteLine($"❌ Error updating music profile: {ex.Message}");
+        Console.WriteLine($"  Error updating music profile: {ex.Message}");
         return Results.Problem(detail: ex.Message, title: "Failed to update music profile");
     }
 });
@@ -373,7 +373,7 @@ app.MapGet("/users", async (AppDbContext db, [FromQuery] Guid? userId, [FromQuer
 {
     try
     {
-        // ✅ Validate required userId
+        //   Validate required userId
         if (userId == null || userId == Guid.Empty)
         {
             return Results.BadRequest(new TakeExUsersResponse
@@ -406,7 +406,7 @@ app.MapGet("/users", async (AppDbContext db, [FromQuery] Guid? userId, [FromQuer
             });
         }
 
-        // 2️⃣ Fetch swiped, queued, and total users in parallel
+        //  Fetch swiped, queued, and total users in parallel
         var swipedTask = db.Likes
             .Where(l => l.FromUserId == currentUserId)
             .AsNoTracking()
@@ -432,7 +432,7 @@ app.MapGet("/users", async (AppDbContext db, [FromQuery] Guid? userId, [FromQuer
 
         Console.WriteLine($"📊 User {currentUserId}: {queueItems.Count} queued, {swipedUserIds.Count} swiped, {totalAvailable} total");
 
-        // 3️⃣ Refill queue if needed
+        //  Refill queue if needed
         var queuedUserIds = queueItems.Select(q => q.SuggestedUserId).ToHashSet();
         bool needsQueueRefill = queueItems.Count < requestedCount * 2;
 
@@ -995,7 +995,7 @@ static string BuildNpgsqlConnectionString(string databaseUrl)
         Host = uri.Host,
         Port = uri.Port > 0 ? uri.Port : 5432,
         Username = userInfo[0],
-        Password = userInfo[1],
+        Password = userInfo[2],
         Database = uri.AbsolutePath.TrimStart('/').Split('?')[0],
         SslMode = Npgsql.SslMode.Require,
         TrustServerCertificate = true
