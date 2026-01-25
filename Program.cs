@@ -12,41 +12,47 @@ DotNetEnv.Env.Load();
 
 var builder = WebApplication.CreateBuilder(args);
 DotNetEnv.Env.Load();
-try
+// try
+// {
+
+//     var databaseUrl = Environment.GetEnvironmentVariable("DatabaseURL")
+//         ?? throw new Exception("DatabaseURL is not set");
+
+//     var connectionString = BuildNpgsqlConnectionString(databaseUrl);
+
+//     Console.WriteLine("Using DATABASE_URL for PostgreSQL");
+
+//     // Build connection string
+//     Console.WriteLine($"Connection string built successfully");
+//     Console.WriteLine($"DB Host: {new Uri(databaseUrl).Host}");
+//     Console.WriteLine($"DB Name: {new Uri(databaseUrl).AbsolutePath.TrimStart('/')}");
+//     builder.Services.AddDbContext<AppDbContext>(opt =>
+//     {
+//         opt.UseNpgsql(connectionString, npgsqlOptions =>
+//         {
+//             npgsqlOptions.EnableRetryOnFailure(
+//                 maxRetryCount: 3,
+//                 maxRetryDelay: TimeSpan.FromSeconds(5),
+//                 errorCodesToAdd: null
+//             );
+//             npgsqlOptions.CommandTimeout(30);
+//         });
+//         opt.UseSnakeCaseNamingConvention();
+//         Console.WriteLine("Using PostgreSQL database (Coolify)");
+//     });
+// }
+// catch (Exception ex)
+// {
+var cs = builder.Configuration.GetConnectionString("PostgresConnection")
+    ?? throw new Exception("PostgresConnection string is not set in configuration");
+
+System.Console.WriteLine(cs);
+
+builder.Services.AddDbContext<AppDbContext>(opt =>
 {
-
-    var databaseUrl = Environment.GetEnvironmentVariable("DatabaseURL")
-        ?? throw new Exception("DatabaseURL is not set");
-
-    var connectionString = BuildNpgsqlConnectionString(databaseUrl);
-
-    Console.WriteLine("Using DATABASE_URL for PostgreSQL");
-
-    // Build connection string
-    Console.WriteLine($"Connection string built successfully");
-    Console.WriteLine($"DB Host: {new Uri(databaseUrl).Host}");
-    Console.WriteLine($"DB Name: {new Uri(databaseUrl).AbsolutePath.TrimStart('/')}");
-    builder.Services.AddDbContext<AppDbContext>(opt =>
-    {
-        opt.UseNpgsql(connectionString, npgsqlOptions =>
-        {
-            npgsqlOptions.EnableRetryOnFailure(
-                maxRetryCount: 3,
-                maxRetryDelay: TimeSpan.FromSeconds(5),
-                errorCodesToAdd: null
-            );
-            npgsqlOptions.CommandTimeout(30);
-        });
-        opt.UseSnakeCaseNamingConvention();
-        Console.WriteLine("Using PostgreSQL database (Coolify)");
-    });
-}
-catch (Exception ex)
-{
-    var cs = Environment.GetEnvironmentVariable("ConnectionStrings__PostgresConnection");
-    await using var connection = new NpgsqlConnection(cs);
-    await connection.OpenAsync();
-}
+    opt.UseNpgsql(cs);
+});
+// }
 
 // ===========================================================
 //  API & SERVICES CONFIGURATION
