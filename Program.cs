@@ -77,6 +77,14 @@ builder.Services.AddCors(options =>
 });
 
 var app = builder.Build();
+
+using (var scope = app.Services.CreateScope())
+{
+    var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+    await db.Database.EnsureDeletedAsync();
+    await db.Database.EnsureCreatedAsync();
+}
+
 app.UseCors("AllowAll");
 
 // ===========================================================
@@ -1624,3 +1632,5 @@ app.MapGet("/swipe/stats/{userId:guid}", SwipeEndpoints.GetSwipeStats);
 Console.WriteLine($"📖 View API documentation at: http://localhost:{port}/swagger");
 
 app.Run();
+
+
