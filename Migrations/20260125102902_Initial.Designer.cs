@@ -11,8 +11,8 @@ using Spotilove;
 namespace JsonDemo.Migrations
 {
     [DbContext(typeof(AppDbContext))]
-    [Migration("20260118083930_InitialCreate")]
-    partial class InitialCreate
+    [Migration("20260125102902_Initial")]
+    partial class Initial
     {
         /// <inheritdoc />
         protected override void BuildTargetModel(ModelBuilder modelBuilder)
