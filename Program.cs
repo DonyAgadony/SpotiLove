@@ -988,7 +988,7 @@ static async Task UpdateQueueScoresInBackground(Guid userId, List<Guid> suggeste
 static string BuildNpgsqlConnectionString(string databaseUrl)
 {
     var uri = new Uri(databaseUrl);
-    var userInfo = uri.UserInfo.Split(':', 2);
+    var userInfo = uri.UserInfo.Split(':');
 
     return new Npgsql.NpgsqlConnectionStringBuilder
     {
