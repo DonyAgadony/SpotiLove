@@ -255,7 +255,7 @@ app.MapGet("/spotify/artist-top-tracks"!, async (
         if (string.IsNullOrWhiteSpace(artistName))
             return Results.BadRequest(new { success = false, message = "Artist name is required" });
 
-        Console.WriteLine($"🎵 Fetching tracks for artist: {artistName}");
+        Console.WriteLine($" Fetching tracks for artist: {artistName}");
         var tracks = await spotifyService.GetArtistTopTracksAsync(artistName, limit);
 
         Console.WriteLine($"  Found {tracks.Count} tracks");
@@ -616,7 +616,7 @@ app.MapPost("/dev/populate-users", async (AppDbContext db, int count = 50) =>
             "Tel Aviv, IL", "Tokyo, JP", "Sydney, AU", "Toronto, CA", "Barcelona, ES"
         };
         var bios = new[] {
-            "Music is my life 🎵",
+            "Music is my life ",
             "Looking for someone who shares my taste in music",
             "Concert buddy wanted!",
             "Vinyl collector and coffee enthusiast ☕",
@@ -989,49 +989,115 @@ static string BuildNpgsqlConnectionString(string databaseUrl)
 }
 //==========EndPoints=========
 // SINGLE Spotify OAuth Callback - handles both login and signup
-
 app.MapGet("/callback", async (
     HttpRequest req,
     SpotifyService spotify,
     AppDbContext db,
     IPasswordHasher<User> hasher) =>
 {
+    foreach (var keyValue in req.Query)
+    {
+        Console.WriteLine($" Query Param: {keyValue.Key} = {keyValue.Value}");
+    }
     try
     {
+        // Log ALL query parameters and request details
+        Console.WriteLine("=== CALLBACK DEBUG START ===");
+        Console.WriteLine($"Full URL: {req.Scheme}://{req.Host}{req.Path}{req.QueryString}");
+        Console.WriteLine($"Query String: {req.QueryString}");
+        Console.WriteLine($"Method: {req.Method}");
+        Console.WriteLine($"Headers:");
+        foreach (var header in req.Headers)
+        {
+            Console.WriteLine($"  {header.Key}: {header.Value}");
+        }
+        Console.WriteLine("Query Parameters:");
+        foreach (var param in req.Query)
+        {
+            Console.WriteLine($"  {param.Key} = {param.Value}");
+        }
+        Console.WriteLine("=== CALLBACK DEBUG END ===");
+
         var code = req.Query["code"].ToString();
         var error = req.Query["error"].ToString();
-        System.Console.WriteLine($"111111111111111{code}|{error}");
 
-        Console.WriteLine($"Callback received - Code present: {!string.IsNullOrEmpty(code)}, Error: {error}");
+        Console.WriteLine($" Parsed - Code: {code}, Error: {error}");
 
         if (!string.IsNullOrEmpty(error))
         {
-            Console.WriteLine($"Spotify authorization declined: {error}");
+            Console.WriteLine($" Spotify authorization declined: {error}");
             return Results.Redirect("spotilove://auth/error?message=Authorization declined");
         }
 
         if (string.IsNullOrEmpty(code))
         {
-            Console.WriteLine("Missing authorization code");
-            return Results.Redirect("spotilove://auth/error?message=Missing authorization code");
+            Console.WriteLine(" Missing authorization code - stopping redirect loop");
+
+            // Return HTML error page instead of redirecting to avoid loop
+            var errorHtml = @"
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset='UTF-8'>
+    <title>SpotiLove - Error</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif;
+            background: #191414;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            margin: 0;
+            color: white;
+        }
+        .container {
+            text-align: center;
+            padding: 40px;
+            background: rgba(255,0,0,0.1);
+            border-radius: 20px;
+            max-width: 500px;
+        }
+        h1 { color: #ff4444; }
+        pre { 
+            background: rgba(0,0,0,0.5); 
+            padding: 15px; 
+            border-radius: 8px;
+            text-align: left;
+            overflow-x: auto;
+        }
+        a { color: #1db954; text-decoration: none; font-weight: bold; }
+    </style>
+</head>
+<body>
+    <div class='container'>
+        <h1> Authentication Error</h1>
+        <p>Missing authorization code from Spotify</p>
+        <pre>URL: " + req.Scheme + "://" + req.Host + req.Path + req.QueryString + @"</pre>
+        <p><a href='spotilove://auth/error?message=Missing+authorization+code'>Return to App</a></p>
+        <p><small>Check server logs for details</small></p>
+    </div>
+</body>
+</html>";
+            return Results.Content(errorHtml, "text/html");
         }
 
-        Console.WriteLine("Valid callback code received");
+        Console.WriteLine(" Valid callback code received");
 
         // Connect to Spotify
         await spotify.ConnectUserAsync(code);
-        Console.WriteLine("Connected to Spotify API");
+        Console.WriteLine(" Connected to Spotify API");
 
         // Fetch user profile
         var spotifyProfile = await spotify.GetUserProfileAsync();
 
         if (spotifyProfile == null || string.IsNullOrEmpty(spotifyProfile.Email))
         {
-            Console.WriteLine("Failed to fetch Spotify profile");
+            Console.WriteLine(" Failed to fetch Spotify profile");
             return Results.Redirect("spotilove://auth/error?message=Unable to fetch email from Spotify");
         }
 
-        Console.WriteLine($"Spotify email: {spotifyProfile.Email}");
+        Console.WriteLine($" Spotify email: {spotifyProfile.Email}");
 
         // Check for existing user
         var existingUser = await db.Users
@@ -1051,12 +1117,12 @@ app.MapGet("/callback", async (
             var hashedPassword = hasher.HashPassword(null!, randomPassword);
 
             //Fetch music data BEFORE creating user
-            Console.WriteLine("Fetching Spotify music data...");
+            Console.WriteLine(" Fetching Spotify music data...");
             var topSongs = await spotify.GetUserTopSongsAsync(10);
             var topArtists = await spotify.GetUserTopArtistsWithImagesAsync(10);
             var topGenres = await spotify.GetUserTopGenresAsync(20);
 
-            Console.WriteLine($"Fetched: {topSongs.Count} songs, {topArtists.Count} artists, {topGenres.Count} genres");
+            Console.WriteLine($" Fetched: {topSongs.Count} songs, {topArtists.Count} artists, {topGenres.Count} genres");
 
             user = new User
             {
@@ -1110,7 +1176,6 @@ app.MapGet("/callback", async (
             else
             {
                 // Clear existing lists first, then add new items
-                // This ensures EF Core properly tracks the changes
                 user.MusicProfile.FavoriteGenres.Clear();
                 user.MusicProfile.FavoriteGenres.AddRange(topGenres.Select(g => g.Trim()));
 
@@ -1120,7 +1185,6 @@ app.MapGet("/callback", async (
                 user.MusicProfile.FavoriteSongs.Clear();
                 user.MusicProfile.FavoriteSongs.AddRange(topSongs.Select(s => s.Trim()));
 
-                // Explicitly mark as modified
                 db.Entry(user.MusicProfile).State = EntityState.Modified;
             }
 
@@ -1136,7 +1200,6 @@ app.MapGet("/callback", async (
         var deepLinkUrl = $"spotilove://auth/success?token={Uri.EscapeDataString(token)}&userId={user.Id}&isNewUser={isNewUser}&name={Uri.EscapeDataString(user.Name ?? "User")}";
 
         Console.WriteLine($" Redirecting to app: {deepLinkUrl}");
-
 
         // Return HTML redirect page
         var html = $@"
@@ -1260,7 +1323,6 @@ app.MapGet("/callback", async (
 .WithName("SpotifyCallback")
 .WithSummary("Handles Spotify OAuth callback")
 .WithDescription("Processes Spotify authorization code and creates/logs in user with music profile");
-
 app.MapGet("/login/test", () =>
 {
     return Results.Ok(new
