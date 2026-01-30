@@ -1000,7 +1000,7 @@ app.MapGet("/callback", async (
     {
         var code = req.Query["code"].ToString();
         var error = req.Query["error"].ToString();
-        System.Console.WriteLine($"{code}|{error}");
+        System.Console.WriteLine($"111111111111111{code}|{error}");
 
         Console.WriteLine($"Callback received - Code present: {!string.IsNullOrEmpty(code)}, Error: {error}");
 
