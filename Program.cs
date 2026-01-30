@@ -989,7 +989,6 @@ static string BuildNpgsqlConnectionString(string databaseUrl)
 }
 //==========EndPoints=========
 // SINGLE Spotify OAuth Callback - handles both login and signup
-// Replace the existing app.MapGet("/callback", ...) in Program.cs with this:
 
 app.MapGet("/callback", async (
     HttpRequest req,
@@ -1001,6 +1000,7 @@ app.MapGet("/callback", async (
     {
         var code = req.Query["code"].ToString();
         var error = req.Query["error"].ToString();
+        System.Console.WriteLine($"{code}|{error}");
 
         Console.WriteLine($"Callback received - Code present: {!string.IsNullOrEmpty(code)}, Error: {error}");
 
