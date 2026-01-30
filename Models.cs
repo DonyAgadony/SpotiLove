@@ -8,7 +8,9 @@ namespace Spotilove;
 public class User
 {
     [Key]
+    [Column(TypeName = "uuid")]  // ✅ Explicitly set PostgreSQL type
     public Guid Id { get; set; } = Guid.NewGuid();
+
     public string Name { get; set; } = string.Empty;
     public int Age { get; set; }
     public string Gender { get; set; } = string.Empty;
@@ -31,10 +33,13 @@ public class User
 public class MusicProfile
 {
     [Key]
+    [Column(TypeName = "uuid")]
     public Guid Id { get; set; } = Guid.NewGuid();
 
     [Required]
+    [Column(TypeName = "uuid")]
     public Guid UserId { get; set; }
+
     public List<string> FavoriteGenres { get; set; } = new();
     public List<string> FavoriteArtists { get; set; } = new();
     public List<string> FavoriteSongs { get; set; } = new();
@@ -47,10 +52,13 @@ public class MusicProfile
 public class UserImage
 {
     [Key]
+    [Column(TypeName = "uuid")]
     public Guid Id { get; set; } = Guid.NewGuid();
 
     [Required]
+    [Column(TypeName = "uuid")]
     public Guid UserId { get; set; }
+
     public string ImageUrl { get; set; } = string.Empty;
 
     [NotMapped]
@@ -67,11 +75,12 @@ public class UserImage
 
 public class Like
 {
-    [Key, Column(Order = 0)]
+    [Key, Column(Order = 0, TypeName = "uuid")]
     public Guid FromUserId { get; set; }
 
-    [Key, Column(Order = 1)]
+    [Key, Column(Order = 1, TypeName = "uuid")]
     public Guid ToUserId { get; set; }
+
     public bool IsLike { get; set; }
     public bool IsMatch { get; set; } = false;
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
@@ -87,11 +96,12 @@ public class Like
 
 public class UserSuggestionQueue
 {
-    [Key, Column(Order = 0)]
+    [Key, Column(Order = 0, TypeName = "uuid")]
     public Guid UserId { get; set; }
 
-    [Key, Column(Order = 1)]
+    [Key, Column(Order = 1, TypeName = "uuid")]
     public Guid SuggestedUserId { get; set; }
+
     public double CompatibilityScore { get; set; }
     public int QueuePosition { get; set; }
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
@@ -103,6 +113,86 @@ public class UserSuggestionQueue
     [JsonIgnore]
     [ForeignKey(nameof(SuggestedUserId))]
     public User SuggestedUser { get; set; } = null!;
+}
+
+// =======================================================
+// ===== CHATS MODELS                                =====
+// =======================================================
+public class Message
+{
+    [Key]
+    [Column(TypeName = "uuid")]
+    public Guid Id { get; set; } = Guid.NewGuid();
+
+    [Required]
+    [Column(TypeName = "uuid")]
+    public Guid FromUserId { get; set; }
+
+    [Required]
+    [Column(TypeName = "uuid")]
+    public Guid ToUserId { get; set; }
+
+    [Required]
+    public string Content { get; set; } = string.Empty;
+
+    public DateTime SentAt { get; set; } = DateTime.UtcNow;
+
+    public DateTime? ReadAt { get; set; }
+
+    public bool IsRead { get; set; } = false;
+
+    [JsonIgnore]
+    [ForeignKey(nameof(FromUserId))]
+    public User FromUser { get; set; } = null!;
+
+    [JsonIgnore]
+    [ForeignKey(nameof(ToUserId))]
+    public User ToUser { get; set; } = null!;
+}
+
+// =======================================================
+// ====               DTO MAPPERS                    =====
+// =======================================================
+public static class DtoMappers
+{
+    public class SpotifySongDto
+    {
+        public string Title { get; set; } = "";
+        public string Artist { get; set; } = "";
+        public string? PreviewUrl { get; set; }
+        public string? SpotifyUri { get; set; }
+        public string? SpotifyUrl { get; set; }
+        public string? DeezerPreviewUrl { get; set; }
+    }
+
+    public record BasicProfileUpdateRequest(
+        int Age,
+        string Gender,
+        string SexualOrientation,
+        string? Bio = null
+    );
+
+    public static UserDto ToUserDto(User user)
+    {
+        return new UserDto
+        {
+            Id = user.Id,
+            Name = user.Name,
+            Age = user.Age,
+            Email = user.Email,
+            Location = user.Location ?? "",
+            Bio = user.Bio ?? "",
+            Gender = user.Gender,
+            SexualOrientation = user.SexualOrientation,
+            Images = user.Images.Select(i => i.ImageUrl).ToList(),
+            MusicProfile = user.MusicProfile != null ? new MusicProfileDto
+            {
+                FavoriteArtists = user.MusicProfile.FavoriteArtists ?? new List<string>(),
+                FavoriteGenres = user.MusicProfile.FavoriteGenres ?? new List<string>(),
+                FavoriteSongs = user.MusicProfile.FavoriteSongs ?? new List<string>(),
+            } : new MusicProfileDto()
+        };
+    }
 }
 
 // =======================================================
@@ -128,7 +218,6 @@ public class UserDto
     public MusicProfileDto MusicProfile { get; set; } = new();
     public List<string> Images { get; set; } = new();
 }
-
 
 public class TakeExUsersResponse
 {
@@ -156,9 +245,9 @@ public class RegisterRequest
 
     public string? SexualOrientation { get; set; }
 
-    public string? Bio { get; set; } // Add Bio field
+    public string? Bio { get; set; }
 
-    public string? ProfileImage { get; set; } // Profile image as base64
+    public string? ProfileImage { get; set; }
 }
 
 public class LoginRequestFromApp
@@ -168,13 +257,11 @@ public class LoginRequestFromApp
     public bool RememberMe { get; set; }
 }
 
-
-public class CompatibilityResult : UserDto // Inheriting from UserDto is cleaner
+public class CompatibilityResult : UserDto
 {
     public double CompatibilityScore { get; set; }
 }
 
-// ===== REQUEST/RECORDS (Simplified DTOs for Endpoints) =====
 public record CreateUserDto(
     string Name,
     int Age,
@@ -189,18 +276,20 @@ public record CreateUserDto(
     string? GenderIdentity = null,
     string? AttractionPreferences = null
 );
-// Changed to nullable strings for partial updates
+
 public record UpdateProfileDto(string? Genres, string? Artists, string? Songs);
 
 public record SwipeDto(Guid FromUserId, Guid ToUserId, bool IsLike);
 
 public record SendLikeDto(Guid FromUserId, Guid ToUserId);
-public record LikeDto(int FromUserId, int ToUserId, bool IsLike);
+
+public record LikeDto(Guid FromUserId, Guid ToUserId, bool IsLike);
 
 public record BatchCalculateRequest(
     Guid UserId,
     List<Guid> TargetUserIds
 );
+
 public class ResponseMessage
 {
     public bool Success { get; set; }
@@ -213,87 +302,8 @@ public record UpdateMusicProfileRequest(
     string Genres
 );
 
-// =======================================================
-// ====               CHATS MODELS                   =====
-// =======================================================
-public class Message
-{
-    [Key]
-    public Guid Id { get; set; } = Guid.NewGuid();
-
-    [Required]
-    public Guid FromUserId { get; set; }
-
-    [Required]
-    public Guid ToUserId { get; set; }
-
-    [Required]
-    public string Content { get; set; } = string.Empty;
-
-    public DateTime SentAt { get; set; } = DateTime.UtcNow;
-
-    public DateTime? ReadAt { get; set; }
-
-    public bool IsRead { get; set; } = false;
-
-    [JsonIgnore]
-    [ForeignKey(nameof(FromUserId))]
-    public User FromUser { get; set; } = null!;
-
-    [JsonIgnore]
-    [ForeignKey(nameof(ToUserId))]
-    public User ToUser { get; set; } = null!;
-}
-// =======================================================
-// =====              DTO MAPPERS                    =====
-// =======================================================
-public static class DtoMappers
-{
-    public class SpotifySongDto
-    {
-        public string Title { get; set; } = "";
-        public string Artist { get; set; } = "";
-        public string? PreviewUrl { get; set; }
-        public string? SpotifyUri { get; set; }
-        public string? SpotifyUrl { get; set; }
-        public string? DeezerPreviewUrl { get; set; }
-
-    }
-
-    /// Helper to convert User entity to UserDto
-    public record BasicProfileUpdateRequest(
-        int Age,
-        string Gender,
-        string SexualOrientation,
-        string? Bio = null
-    );
-    public static UserDto ToUserDto(User user)
-    {
-        return new UserDto
-        {
-            Id = user.Id,
-            Name = user.Name,
-            Age = user.Age,
-            Email = user.Email,
-            Location = user.Location ?? "",
-            Bio = user.Bio ?? "",
-            Gender = user.Gender,
-            SexualOrientation = user.SexualOrientation,
-            Images = user.Images.Select(i => i.ImageUrl).ToList(),
-            MusicProfile = user.MusicProfile != null ? new MusicProfileDto
-            {
-                FavoriteArtists = user.MusicProfile.FavoriteArtists ?? new List<string>(),
-                FavoriteGenres = user.MusicProfile.FavoriteGenres ?? new List<string>(),
-                FavoriteSongs = user.MusicProfile.FavoriteSongs ?? new List<string>(),
-            } : new MusicProfileDto()
-        };
-    }
-}
 public static class Endpoints
 {
-
-    /// Creates a new user with an initial music profile.
-
     public static async Task<IResult> CreateUser(AppDbContext db, CreateUserDto dto)
     {
         var user = new User
@@ -326,7 +336,6 @@ public static class Endpoints
             } : new MusicProfileDto()
         });
     }
-    /// Gets a user profile by ID.
 
     public static async Task<IResult> GetUser(AppDbContext db, Guid id)
     {
@@ -340,7 +349,6 @@ public static class Endpoints
         return Results.Ok(user);
     }
 
-    // Updates only the music profile fields.
     public static async Task<IResult> UpdateProfile(AppDbContext db, Guid id, UpdateProfileDto dto)
     {
         var user = await db.Users
@@ -371,9 +379,6 @@ public static class Endpoints
         return Results.Ok(user);
     }
 
-
-    /// Returns a list of all users.
-
     public static async Task<IResult> SearchUsers(AppDbContext db)
     {
         var users = await db.Users
@@ -384,8 +389,6 @@ public static class Endpoints
 
         return Results.Ok(users);
     }
-
-    /// Adds a new image URL to a user's profile.
 
     public static async Task<IResult> AddUserImage(AppDbContext db, Guid id, UserImage image)
     {
@@ -403,8 +406,6 @@ public static class Endpoints
 
         return Results.Ok(image);
     }
-
-    /// Gets all images for a specific user.
 
     public static async Task<IResult> GetUserImages(AppDbContext db, Guid id)
     {
