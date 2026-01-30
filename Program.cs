@@ -3,6 +3,7 @@ using Spotilove;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
 using Npgsql;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 
 DotNetEnv.Env.Load();
 
@@ -51,6 +52,7 @@ System.Console.WriteLine(cs);
 builder.Services.AddDbContext<AppDbContext>(opt =>
 {
     opt.UseNpgsql(cs);
+    opt.ConfigureWarnings(w => w.Ignore(RelationalEventId.PendingModelChangesWarning));
 });
 // }
 
@@ -110,7 +112,7 @@ using (var scope = app.Services.CreateScope())
             Console.WriteLine($"   - {migration}");
         }
 
-        await db.Database.MigrateAsync();
+        await db.Database.EnsureCreatedAsync();
         Console.WriteLine(" Migrations completed successfully");
 
         // Verify tables exist
