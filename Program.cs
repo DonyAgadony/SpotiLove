@@ -13,37 +13,6 @@ DotNetEnv.Env.Load();
 
 var builder = WebApplication.CreateBuilder(args);
 DotNetEnv.Env.Load();
-// try
-// {
-
-//     var databaseUrl = Environment.GetEnvironmentVariable("DatabaseURL")
-//         ?? throw new Exception("DatabaseURL is not set");
-
-//     var connectionString = BuildNpgsqlConnectionString(databaseUrl);
-
-//     Console.WriteLine("Using DATABASE_URL for PostgreSQL");
-
-//     // Build connection string
-//     Console.WriteLine($"Connection string built successfully");
-//     Console.WriteLine($"DB Host: {new Uri(databaseUrl).Host}");
-//     Console.WriteLine($"DB Name: {new Uri(databaseUrl).AbsolutePath.TrimStart('/')}");
-//     builder.Services.AddDbContext<AppDbContext>(opt =>
-//     {
-//         opt.UseNpgsql(connectionString, npgsqlOptions =>
-//         {
-//             npgsqlOptions.EnableRetryOnFailure(
-//                 maxRetryCount: 3,
-//                 maxRetryDelay: TimeSpan.FromSeconds(5),
-//                 errorCodesToAdd: null
-//             );
-//             npgsqlOptions.CommandTimeout(30);
-//         });
-//         opt.UseSnakeCaseNamingConvention();
-//         Console.WriteLine("Using PostgreSQL database (Coolify)");
-//     });
-// }
-// catch (Exception ex)
-// {
 var cs = builder.Configuration.GetConnectionString("PostgresConnection")
     ?? throw new Exception("PostgresConnection string is not set in configuration");
 
@@ -54,7 +23,6 @@ builder.Services.AddDbContext<AppDbContext>(opt =>
     opt.UseNpgsql(cs);
     opt.ConfigureWarnings(w => w.Ignore(RelationalEventId.PendingModelChangesWarning));
 });
-// }
 
 // ===========================================================
 //  API & SERVICES CONFIGURATION
@@ -135,7 +103,7 @@ using (var scope = app.Services.CreateScope())
 }
 
 // ===========================================================
-// 🧑‍💻 DEVELOPMENT TOOLS
+//                    DEVELOPMENT TOOLS
 // ===========================================================
 if (app.Environment.IsDevelopment())
 {
@@ -144,7 +112,7 @@ if (app.Environment.IsDevelopment())
 }
 
 // ===========================================================
-// 🌐 SERVER CONFIGURATION
+//                 SERVER CONFIGURATION
 // ===========================================================
 var port = Environment.GetEnvironmentVariable("PORT") ?? "10000";
 if (!builder.Environment.IsEnvironment("Design"))
@@ -199,7 +167,7 @@ app.MapGet("/spotify/popular-artists", async (SpotifyService spotifyService, int
     }
     catch (Exception ex)
     {
-        Console.WriteLine($"❌ Error fetching popular artists: {ex.Message}");
+        Console.WriteLine($" Error fetching popular artists: {ex.Message}");
         return Results.Problem(detail: ex.Message, title: "Failed to fetch popular artists");
     }
 })
@@ -236,7 +204,7 @@ app.MapGet("/debug/all-users", async (AppDbContext db) =>
             .Take(50) // Get last 20 users
             .ToListAsync();
 
-        Console.WriteLine($"📊 Total users in database: {users.Count}");
+        Console.WriteLine($" Total users in database: {users.Count}");
 
         var result = users.Select(u => new
         {
@@ -406,7 +374,7 @@ app.MapGet("/users", async (AppDbContext db, [FromQuery] Guid? userId, [FromQuer
         Guid currentUserId = userId.Value;
         int requestedCount = Math.Clamp(count ?? 10, 1, 50);
 
-        // 1️⃣ Load current user + profile
+        //  Load current user + profile
         var currentUser = await db.Users
              .Include(u => u.MusicProfile)
              .AsNoTracking()
@@ -448,7 +416,7 @@ app.MapGet("/users", async (AppDbContext db, [FromQuery] Guid? userId, [FromQuer
         var queueItems = queueTask.Result;
         var totalAvailable = totalUsersTask.Result;
 
-        Console.WriteLine($"📊 User {currentUserId}: {queueItems.Count} queued, {swipedUserIds.Count} swiped, {totalAvailable} total");
+        Console.WriteLine($" User {currentUserId}: {queueItems.Count} queued, {swipedUserIds.Count} swiped, {totalAvailable} total");
 
         //  Refill queue if needed
         var queuedUserIds = queueItems.Select(q => q.SuggestedUserId).ToHashSet();
@@ -470,7 +438,7 @@ app.MapGet("/users", async (AppDbContext db, [FromQuery] Guid? userId, [FromQuer
 
             if (candidateIds.Any())
             {
-                Console.WriteLine($"🔄 Batch processing {candidateIds.Count} new candidates...");
+                Console.WriteLine($" Batch processing {candidateIds.Count} new candidates...");
 
                 var candidates = await db.Users
                     .Include(u => u.MusicProfile)
@@ -521,7 +489,7 @@ app.MapGet("/users", async (AppDbContext db, [FromQuery] Guid? userId, [FromQuer
                     {
                         db.UserSuggestionQueues.AddRange(newInserts);
                         await db.SaveChangesAsync();
-                        Console.WriteLine($"✅ Batch inserted {newInserts.Count} queue items (filtered from {batchInserts.Count})");
+                        Console.WriteLine($" Batch inserted {newInserts.Count} queue items (filtered from {batchInserts.Count})");
 
                         queueItems.AddRange(newInserts);
                         queueItems = queueItems
@@ -544,17 +512,17 @@ app.MapGet("/users", async (AppDbContext db, [FromQuery] Guid? userId, [FromQuer
                     }
                     else
                     {
-                        Console.WriteLine("⚠️ All candidates already existed in queue, skipping insert.");
+                        Console.WriteLine(" All candidates already existed in queue, skipping insert.");
                     }
                 }
                 catch (DbUpdateException ex)
                 {
-                    Console.WriteLine($"⚠️ Batch insert conflict: {ex.InnerException?.Message}");
+                    Console.WriteLine($" Batch insert conflict: {ex.InnerException?.Message}");
                 }
             }
         }
 
-        // 4️⃣ Return top suggestions
+        //  Return top suggestions
         var topSuggestionIds = queueItems
             .Take(requestedCount)
             .Select(q => q.SuggestedUserId)
@@ -571,7 +539,7 @@ app.MapGet("/users", async (AppDbContext db, [FromQuery] Guid? userId, [FromQuer
             });
         }
 
-        // 5️⃣ Fetch user details and FILTER users without MusicProfile
+        //  Fetch user details and FILTER users without MusicProfile
         var users = await db.Users
             .Include(u => u.MusicProfile)
             .Include(u => u.Images)
@@ -579,12 +547,12 @@ app.MapGet("/users", async (AppDbContext db, [FromQuery] Guid? userId, [FromQuer
             .AsNoTracking()
             .ToListAsync();
 
-        // ✅ FIX: Filter out users without MusicProfile before mapping
+        //  FIX: Filter out users without MusicProfile before mapping
         var validUsers = users.Where(u => u.MusicProfile != null).ToList();
 
         if (validUsers.Count < users.Count)
         {
-            Console.WriteLine($"⚠️ Filtered out {users.Count - validUsers.Count} users without MusicProfile");
+            Console.WriteLine($" Filtered out {users.Count - validUsers.Count} users without MusicProfile");
         }
 
         var userDict = validUsers.ToDictionary(u => u.Id);
@@ -605,7 +573,7 @@ app.MapGet("/users", async (AppDbContext db, [FromQuery] Guid? userId, [FromQuer
     }
     catch (Exception ex)
     {
-        Console.WriteLine($"❌ Error in /users: {ex.Message}\n{ex.StackTrace}");
+        Console.WriteLine($" Error in /users: {ex.Message}\n{ex.StackTrace}");
         return Results.Ok(new TakeExUsersResponse
         {
             Success = false,
@@ -624,7 +592,7 @@ app.MapPost("/dev/populate-users", async (AppDbContext db, int count = 50) =>
 {
     try
     {
-        Console.WriteLine($"🚀 Creating {count} temporary users...");
+        Console.WriteLine($" Creating {count} temporary users...");
 
         var random = new Random();
         var names = new[] { "Alex", "Jordan", "Taylor", "Morgan", "Casey", "Riley", "Avery", "Quinn", "Sam", "Drew" };
@@ -742,7 +710,7 @@ app.MapPost("/dev/populate-users", async (AppDbContext db, int count = 50) =>
     }
     catch (Exception ex)
     {
-        Console.WriteLine($"❌ Error creating users: {ex.Message}\n{ex.StackTrace}");
+        Console.WriteLine($" Error creating users: {ex.Message}\n{ex.StackTrace}");
         return Results.Problem(
             detail: ex.Message,
             title: "Failed to create users",
@@ -783,7 +751,7 @@ app.MapDelete("/dev/clear-users", async (AppDbContext db) =>
     }
 })
 .WithName("ClearAllUsers")
-.WithSummary("⚠️ DELETE all users (Development only)")
+.WithSummary(" DELETE all users (Development only)")
 .WithDescription("Removes ALL users and related data from database. Use with extreme caution!");
 // ---- Music Profile ----
 app.MapPost("/users/{id:guid}/music-profile", async (AppDbContext db, Guid id, MusicProfileDto dto) =>
@@ -1077,7 +1045,7 @@ app.MapGet("/callback", async (
         {
             //Create account with music profile
             isNewUser = true;
-            Console.WriteLine($"👤 Creating new user for: {spotifyProfile.Email}");
+            Console.WriteLine($" Creating new user for: {spotifyProfile.Email}");
 
             var randomPassword = Guid.NewGuid().ToString();
             var hashedPassword = hasher.HashPassword(null!, randomPassword);
@@ -1112,7 +1080,7 @@ app.MapGet("/callback", async (
             db.Users.Add(user);
             await db.SaveChangesAsync();
 
-            Console.WriteLine($"✅ New user created with music profile: {user.Email} (ID: {user.Id})");
+            Console.WriteLine($" New user created with music profile: {user.Email} (ID: {user.Id})");
         }
         else
         {
@@ -1120,7 +1088,7 @@ app.MapGet("/callback", async (
             user = existingUser;
             user.LastLoginAt = DateTime.UtcNow;
             db.Users.Update(user);
-            Console.WriteLine($"🔄 Updating existing user's music profile: {user.Email}");
+            Console.WriteLine($" Updating existing user's music profile: {user.Email}");
 
             // Fetch fresh music data
             var topSongs = await spotify.GetUserTopSongsAsync(10);
@@ -1158,7 +1126,7 @@ app.MapGet("/callback", async (
 
             await db.SaveChangesAsync();
 
-            Console.WriteLine($"✅ Existing user music profile updated: {user.Email} (ID: {user.Id})");
+            Console.WriteLine($" Existing user music profile updated: {user.Email} (ID: {user.Id})");
         }
 
         // Generate auth token
@@ -1167,7 +1135,7 @@ app.MapGet("/callback", async (
         // Build deep link
         var deepLinkUrl = $"spotilove://auth/success?token={Uri.EscapeDataString(token)}&userId={user.Id}&isNewUser={isNewUser}&name={Uri.EscapeDataString(user.Name ?? "User")}";
 
-        Console.WriteLine($"🔗 Redirecting to app: {deepLinkUrl}");
+        Console.WriteLine($" Redirecting to app: {deepLinkUrl}");
 
 
         // Return HTML redirect page
@@ -1244,7 +1212,7 @@ app.MapGet("/callback", async (
     }
     catch (Exception ex)
     {
-        Console.WriteLine($"❌ Callback error: {ex.Message}");
+        Console.WriteLine($" Callback error: {ex.Message}");
         Console.WriteLine($"Stack trace: {ex.StackTrace}");
 
         var errorDeepLink = $"spotilove://auth/error?message={Uri.EscapeDataString(ex.Message)}";
@@ -1279,7 +1247,7 @@ app.MapGet("/callback", async (
 </head>
 <body>
     <div class='container'>
-        <h1>❌ Authentication Failed</h1>
+        <h1> Authentication Failed</h1>
         <p>{ex.Message}</p>
         <p><a href='{errorDeepLink}'>Return to App</a></p>
     </div>
@@ -1349,7 +1317,7 @@ app.MapPut("/users/{userId:guid}/basic-profile", async (
     }
     catch (Exception ex)
     {
-        Console.WriteLine($"❌ Error updating basic profile: {ex.Message}");
+        Console.WriteLine($" Error updating basic profile: {ex.Message}");
         return Results.Problem(
             detail: ex.Message,
             title: "Failed to update profile",
@@ -1365,7 +1333,7 @@ app.MapGet("/takeExUsers", async (AppDbContext db, int count) =>
 {
     try
     {
-        Console.WriteLine($"🎯 Taking {count} random users from DB...");
+        Console.WriteLine($" Taking {count} random users from DB...");
 
         // Fetch all users first (or a large batch if your DB grows big)
         var allUsers = await db.Users
@@ -1375,7 +1343,7 @@ app.MapGet("/takeExUsers", async (AppDbContext db, int count) =>
 
         if (allUsers.Count == 0)
         {
-            Console.WriteLine("⚠️ No users found in DB");
+            Console.WriteLine(" No users found in DB");
             return Results.NotFound(new { success = false, message = "No users found in database" });
         }
 
@@ -1383,7 +1351,7 @@ app.MapGet("/takeExUsers", async (AppDbContext db, int count) =>
         var random = new Random();
         var users = allUsers.OrderBy(_ => random.Next()).Take(count).ToList();
 
-        Console.WriteLine($"✅ Retrieved {users.Count} random users");
+        Console.WriteLine($" Retrieved {users.Count} random users");
 
         return Results.Ok(new
         {
@@ -1409,7 +1377,7 @@ app.MapGet("/takeExUsers", async (AppDbContext db, int count) =>
     }
     catch (Exception ex)
     {
-        Console.WriteLine($"❌ Failed to take users: {ex.Message}");
+        Console.WriteLine($" Failed to take users: {ex.Message}");
         return Results.Problem(
             detail: ex.Message,
             title: "Failed to take users",
@@ -1426,12 +1394,12 @@ app.MapGet("/login", (SpotifyService spotify) =>
     try
     {
         var loginUrl = spotify.GetLoginUrl();
-        Console.WriteLine($"🔗 Redirecting to Spotify: {loginUrl}");
+        Console.WriteLine($" Redirecting to Spotify: {loginUrl}");
         return Results.Redirect(loginUrl);
     }
     catch (Exception ex)
     {
-        Console.WriteLine($"❌ Login error: {ex.Message}");
+        Console.WriteLine($" Login error: {ex.Message}");
         return Results.Problem(
             detail: ex.Message,
             title: "Failed to initiate Spotify login",
@@ -1450,18 +1418,18 @@ app.MapPost("/auth/register", async (
 {
     try
     {
-        Console.WriteLine($"📝 Registration attempt for email: {request.Email}");
+        Console.WriteLine($" Registration attempt for email: {request.Email}");
 
         // Check if email already exists
         if (await db.Users.AnyAsync(u => u.Email == request.Email))
         {
-            Console.WriteLine($"❌ Email already exists: {request.Email}");
+            Console.WriteLine($" Email already exists: {request.Email}");
             return Results.BadRequest(new { success = false, message = "Email already exists" });
         }
 
         // Hash password
         var hashedPassword = hasher.HashPassword(null!, request.Password);
-        Console.WriteLine("✅ Password hashed successfully");
+        Console.WriteLine(" Password hashed successfully");
 
         // Create user with ALL required fields
         var user = new User
@@ -1478,34 +1446,34 @@ app.MapPost("/auth/register", async (
             LastLoginAt = null
         };
 
-        Console.WriteLine($"✅ User object created: {user.Name}");
+        Console.WriteLine($" User object created: {user.Name}");
 
         // Add user to database
         db.Users.Add(user);
 
         // Save changes and get the user ID
         var saveResult = await db.SaveChangesAsync();
-        Console.WriteLine($"✅ SaveChanges returned: {saveResult} changes");
-        Console.WriteLine($"✅ User ID assigned: {user.Id}");
+        Console.WriteLine($" SaveChanges returned: {saveResult} changes");
+        Console.WriteLine($" User ID assigned: {user.Id}");
         if (user.Id == Guid.Empty)
         {
-            Console.WriteLine("❌ User ID was not assigned properly!");
+            Console.WriteLine(" User ID was not assigned properly!");
             return Results.Problem("Failed to create user - ID not assigned");
         }
 
         // Generate token
         var token = Guid.NewGuid().ToString();
-        Console.WriteLine($"✅ Token generated: {token}");
+        Console.WriteLine($" Token generated: {token}");
 
         // Verify user was saved by querying it back
         var savedUser = await db.Users.FirstOrDefaultAsync(u => u.Id == user.Id);
         if (savedUser == null)
         {
-            Console.WriteLine($"❌ User {user.Id} was not found after save!");
+            Console.WriteLine($" User {user.Id} was not found after save!");
             return Results.Problem("User creation failed - could not verify save");
         }
 
-        Console.WriteLine($"✅ User verified in database: {savedUser.Email}");
+        Console.WriteLine($" User verified in database: {savedUser.Email}");
 
         return Results.Ok(new
         {
@@ -1526,12 +1494,12 @@ app.MapPost("/auth/register", async (
     }
     catch (Exception ex)
     {
-        Console.WriteLine($"❌ Registration error: {ex.Message}");
-        Console.WriteLine($"❌ Stack trace: {ex.StackTrace}");
+        Console.WriteLine($" Registration error: {ex.Message}");
+        Console.WriteLine($" Stack trace: {ex.StackTrace}");
 
         if (ex.InnerException != null)
         {
-            Console.WriteLine($"❌ Inner exception: {ex.InnerException.Message}");
+            Console.WriteLine($" Inner exception: {ex.InnerException.Message}");
         }
 
         return Results.Problem(
